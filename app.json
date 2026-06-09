@@ -1,4 +1,7 @@
 {
   "name": "ApplicationBuddyHD",
-  "displayName": "ApplicationBuddyHD"
+  "displayName": "ApplicationBuddyHD",
+  "plugins": [
+    "expo-speech-recognition"
+  ]
 }

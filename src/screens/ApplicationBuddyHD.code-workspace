@@ -1,0 +1,15 @@
+{
+	"folders": [
+		{
+			"name": "ApplicationBuddyHD",
+			"path": "../.."
+		}
+	],
+	"settings": {
+		"chatgpt.commentCodeLensEnabled": false,
+		"twinny.providerStorageLocation": "file",
+		"twinny.enabledLanguages": {
+			"*javascript": true
+		}
+	}
+}

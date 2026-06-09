@@ -35,6 +35,10 @@
 	</dict>
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string></string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>We use the microphone to turn your voice into chat messages.</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>We use speech recognition to help ARIA understand your voice request.</string>
 	<key>RCTNewArchEnabled</key>
 	<true/>
 	<key>UILaunchStoryboardName</key>
