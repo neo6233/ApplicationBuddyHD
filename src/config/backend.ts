@@ -5,7 +5,7 @@ export const BACKEND_URL =
 
 export const getDefaultLocalBaseUrl = () => {
   if (__DEV__) {
-    return Platform.OS === 'android' ? 'http://10.0.2.2:5000' : 'http://localhost:5000';
+    return Platform.OS === 'android' ? 'http://10.132.248.142:5000' : 'http://10.132.248.142:5000';
   }
   return '';
 };

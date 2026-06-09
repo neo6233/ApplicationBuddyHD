@@ -1,6 +1,93 @@
 import {Request, Response} from 'express';
 import GeminiService from '../services/GeminiService'; // still named GeminiService.ts, just uses Ollama now
 import ProgramService from '../services/ProgramService';
+import {PROGRAM_CATALOG, ProgramCatalogItem} from '../data/programCatalog';
+
+const normalize = (text: string) =>
+  text.toLowerCase().replace(/[\u2018\u2019]/g, "'").replace(/\s+/g, ' ').trim();
+
+const includesAny = (text: string, keywords: string[]) =>
+  keywords.some(keyword => text.includes(keyword));
+
+const PROGRAM_NAME_LIST = [...PROGRAM_CATALOG]
+  .map(program => program.name)
+  .sort((a, b) => b.length - a.length);
+
+const findProgramMentions = (text: string): ProgramCatalogItem[] => {
+  const normalized = normalize(text);
+  return PROGRAM_CATALOG.filter(program =>
+    normalized.includes(normalize(program.name)),
+  );
+};
+
+const isFollowUpProgramQuestion = (text: string) => {
+  const normalized = normalize(text);
+  return includesAny(normalized, [
+    'this course',
+    'that course',
+    'this program',
+    'that program',
+    'it',
+    'more info',
+    'more information',
+    'details',
+    'duration',
+    'how long',
+    'eligibility',
+    'requirements',
+    'intake',
+    'when',
+    'start',
+  ]);
+};
+
+const resolveProgramFromConversation = (
+  message: string,
+  history: Array<{role: 'user' | 'assistant'; content: string; image?: string | null}>,
+): {program: ProgramCatalogItem | null; ambiguous: boolean} => {
+  const directMentions = findProgramMentions(message);
+  if (directMentions.length === 1) {
+    return {program: directMentions[0], ambiguous: false};
+  }
+
+  if (directMentions.length > 1) {
+    return {program: null, ambiguous: true};
+  }
+
+  if (!isFollowUpProgramQuestion(message)) {
+    return {program: null, ambiguous: false};
+  }
+
+  const lastAssistantMessage = [...history].reverse().find(item => item.role === 'assistant');
+  if (!lastAssistantMessage?.content) {
+    return {program: null, ambiguous: true};
+  }
+
+  const assistantMentions = findProgramMentions(lastAssistantMessage.content);
+  if (assistantMentions.length === 1) {
+    return {program: assistantMentions[0], ambiguous: false};
+  }
+
+  return {program: null, ambiguous: assistantMentions.length !== 0};
+};
+
+const buildProgramDetailReply = (program: ProgramCatalogItem, message: string) => {
+  const normalized = normalize(message);
+
+  if (includesAny(normalized, ['duration', 'how long', 'years', 'months'])) {
+    return `${program.name} is ${program.duration} long.`;
+  }
+
+  if (includesAny(normalized, ['eligib', 'require', 'criteria', 'qualif'])) {
+    return `Eligibility for ${program.name} is ${program.eligibility}.`;
+  }
+
+  if (includesAny(normalized, ['intake', 'when', 'start', 'semester'])) {
+    return `${program.name} intake is ${program.intake}.`;
+  }
+
+  return `${program.name} at ${program.university}, ${program.country}, is a ${program.duration} program. Intake: ${program.intake}. Eligibility: ${program.eligibility}.`;
+};
 
 export const healthController = (_req: Request, res: Response) => {
   res.json({status: 'ok', timestamp: Date.now()});
@@ -30,6 +117,27 @@ export const chatController = async (req: Request, res: Response) => {
       return;
     }
     const userImage = typeof image === 'string' ? image : undefined;
+
+    // ── Direct program follow-up flow ─────────────────────────────────────
+    const programContext = resolveProgramFromConversation(cleanMessage, safeHistory);
+    if (programContext.program) {
+      const reply = buildProgramDetailReply(programContext.program, cleanMessage);
+      res.json({
+        reply,
+        responseType: 'detail',
+        programs: [programContext.program],
+        timestamp: Date.now(),
+      });
+      return;
+    }
+
+    if (programContext.ambiguous) {
+      res.json({
+        reply: 'Which course do you mean from the previous list?',
+        timestamp: Date.now(),
+      });
+      return;
+    }
 
     // ── Greeting shortcut — skip analysis, just reply ──────────────────────
     const greetings = ['hi', 'hii', 'hello', 'hey', 'good morning', 'good afternoon', 'good evening'];
@@ -67,7 +175,12 @@ export const chatController = async (req: Request, res: Response) => {
       const programNames = programs.map(p => `• ${p.name}`).join('\n');
       const reply = `Based on your profile, I found these matching programs in my catalog:\n${programNames}`;
 
-      res.json({reply: reply, programs, timestamp: Date.now()});
+      res.json({
+        reply,
+        responseType: 'recommendation',
+        programs,
+        timestamp: Date.now(),
+      });
       return;
     }
 

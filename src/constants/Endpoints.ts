@@ -6,7 +6,7 @@
 import {Platform} from 'react-native';
 import {BACKEND_URL as backendUrl} from '../config/backend';
 
-export const BASE_URL = backendUrl || (Platform.OS === 'android' ? 'http://10.0.2.2:5000' : 'http://localhost:5000');
+export const BASE_URL = backendUrl || (Platform.OS === 'android' ? 'http://10.132.248.142:5000' : 'http://10.132.248.142:5000');
 
 const Endpoints = {
   CHAT: '/api/chat',

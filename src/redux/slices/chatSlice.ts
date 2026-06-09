@@ -14,6 +14,7 @@ interface ChatState {
   loading: boolean;
   error: string | null;
   totalChats: number;
+  hydratedMessageCount: number;
 }
 
 const initialState: ChatState = {
@@ -22,6 +23,7 @@ const initialState: ChatState = {
   loading: false,
   error: null,
   totalChats: 0,
+  hydratedMessageCount: 0,
 };
 
 // ─── Load history from AsyncStorage ──────────────────────────────────────────
@@ -48,6 +50,8 @@ export const sendMessage = createAsyncThunk(
           role: m.role,
           content: m.content,
           image: m.image || null,
+          inputMode: m.inputMode,
+          programs: m.programs,
         })),
         image: image || null,
       };
@@ -61,6 +65,7 @@ export const sendMessage = createAsyncThunk(
 
       return {
         reply: result.reply,
+        responseType: result.responseType,
         programs: result.programs ?? [],
         timestamp: result.timestamp ?? Date.now(),
       };
@@ -89,15 +94,17 @@ const chatSlice = createSlice({
   reducers: {
     addUserMessage: (
       state,
-      action: PayloadAction<string | {content: string; image?: string | null}>,
+      action: PayloadAction<string | {content: string; image?: string | null; inputMode?: 'voice' | 'text'}>,
     ) => {
       const content = typeof action.payload === 'string' ? action.payload : action.payload.content;
       const image = typeof action.payload === 'string' ? null : (action.payload.image || null);
+      const inputMode = typeof action.payload === 'string' ? 'text' : (action.payload.inputMode || 'text');
       const msg: Message = {
         id: uuidv4(),
         role: 'user',
         content,
         image,
+        inputMode,
         timestamp: Date.now(),
       };
       state.messages.push(msg);
@@ -116,6 +123,7 @@ const chatSlice = createSlice({
       .addCase(loadChatHistory.fulfilled, (state, action) => {
         state.messages = action.payload;
         state.totalChats = action.payload.filter(m => m.role === 'user').length;
+        state.hydratedMessageCount = action.payload.length;
       })
       .addCase(sendMessage.pending, state => {
         state.loading = true;
@@ -143,6 +151,8 @@ const chatSlice = createSlice({
           id: uuidv4(),
           role: 'assistant',
           content: action.payload.reply,
+          responseType: action.payload.responseType,
+          programs: action.payload.programs?.length ? action.payload.programs : undefined,
           timestamp: action.payload.timestamp,
         });
         saveToChatStorage(state.messages);
@@ -151,6 +161,7 @@ const chatSlice = createSlice({
         state.messages = [];
         state.totalChats = 0;
         state.error = null;
+        state.hydratedMessageCount = 0;
       });
   },
 });

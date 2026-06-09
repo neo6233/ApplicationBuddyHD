@@ -201,7 +201,7 @@ console.log('isAvailable =', SpeechToText.isAvailable);
       console.log('[SpeechToText] Starting Recognition...');
 
       await SpeechToText.start({
-        language: 'en-US',
+        language: locale,
       });
 
       recognitionStarted = true;

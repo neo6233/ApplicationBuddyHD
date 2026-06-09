@@ -1,0 +1,71 @@
+interface ProgramFinderInput {
+    qualification: string;
+    gpa: string;
+    interests: string;
+    preferredCountry: string;
+}
+interface ProgramFinderProgram {
+    name: string;
+    university: string;
+    country: string;
+    duration: string;
+    intake: string;
+    eligibility: string;
+    careerOpportunities: string[];
+    matchScore: number;
+}
+interface ProgramFinderResponse {
+    programs: ProgramFinderProgram[];
+    summary: string;
+    totalFound: number;
+}
+export interface AssistantAnalysis {
+    topic: 'course' | 'eligibility' | 'scholarship' | 'visa' | 'general';
+    confidence: number;
+    needsMoreInfo: boolean;
+    followUpQuestion?: string;
+    summary?: string;
+    profile?: {
+        level?: string;
+        field?: string;
+        country?: string;
+        qualification?: string;
+        score?: string;
+        englishScore?: string;
+        workExperience?: string;
+    };
+}
+export declare const buildLocalProgramResponse: (data: ProgramFinderInput) => ProgramFinderResponse;
+declare class OllamaService {
+    private isEnabled;
+    private buildUrl;
+    /**
+     * Core Ollama call using /api/chat (OpenAI-compatible message format).
+     * stream is always false so we get a single JSON response.
+     */
+    private callOllama;
+    analyzeConversation(userMessage: string, history: Array<{
+        role: 'user' | 'assistant';
+        content: string;
+        image?: string | null;
+    }>): Promise<AssistantAnalysis | null>;
+    chat(userMessage: string, history: Array<{
+        role: 'user' | 'assistant';
+        content: string;
+        image?: string | null;
+    }>, options?: {
+        systemPrompt?: string;
+        maxOutputTokens?: number;
+        temperature?: number;
+        userImage?: string | null;
+    }): Promise<string>;
+    checkEligibility(data: {
+        qualification: string;
+        percentage: string;
+        englishScore: string;
+        workExperience: string;
+    }): Promise<string>;
+}
+declare const _default: OllamaService;
+export default _default;
+//# sourceMappingURL=GeminiService.d.ts.map

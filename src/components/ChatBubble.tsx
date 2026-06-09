@@ -1,15 +1,24 @@
 import React from 'react';
-import {View, Text, StyleSheet, Image} from 'react-native';
+import {View, Text, StyleSheet, Image, TouchableOpacity} from 'react-native';
 import Colors from '../constants/Colors';
 import {Message} from '../models/ChatModel';
 import Validators from '../utils/Validators';
 
 interface ChatBubbleProps {
   message: Message;
+  onSaveProgram?: (program: NonNullable<Message['programs']>[number]) => void;
+  isProgramSaved?: (program: NonNullable<Message['programs']>[number]) => boolean;
 }
 
-const ChatBubble: React.FC<ChatBubbleProps> = ({message}) => {
+const ChatBubble: React.FC<ChatBubbleProps> = ({message, onSaveProgram, isProgramSaved}) => {
   const isUser = message.role === 'user';
+  const primaryProgram = message.programs?.[0];
+  const showSaveAction = Boolean(
+    !isUser &&
+      message.responseType === 'recommendation' &&
+      primaryProgram &&
+      onSaveProgram,
+  );
 
   const renderContent = (content: string) => {
     const lines = content.split('\n');
@@ -85,6 +94,23 @@ const ChatBubble: React.FC<ChatBubbleProps> = ({message}) => {
           ) : null}
           {message.content ? (
             <View>{renderContent(message.content)}</View>
+          ) : null}
+          {showSaveAction ? (
+            <TouchableOpacity
+              style={[
+                styles.saveProgramButton,
+                isProgramSaved?.(primaryProgram) && styles.saveProgramButtonSaved,
+              ]}
+              onPress={() => onSaveProgram?.(primaryProgram)}
+              activeOpacity={0.8}>
+              <Text
+                style={[
+                  styles.saveProgramButtonText,
+                  isProgramSaved?.(primaryProgram) && styles.saveProgramButtonTextSaved,
+                ]}>
+                {isProgramSaved?.(primaryProgram) ? '✓ Saved' : 'Save Program'}
+              </Text>
+            </TouchableOpacity>
           ) : null}
         </View>
         <Text
@@ -182,6 +208,27 @@ const styles = StyleSheet.create({
   },
   aiText: {
     color: Colors.bubbleAIText,
+  },
+  saveProgramButton: {
+    alignSelf: 'flex-start',
+    marginTop: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 999,
+    backgroundColor: Colors.accent,
+  },
+  saveProgramButtonSaved: {
+    backgroundColor: Colors.surfaceElevated,
+    borderWidth: 1,
+    borderColor: Colors.border,
+  },
+  saveProgramButtonText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: Colors.textInverse,
+  },
+  saveProgramButtonTextSaved: {
+    color: Colors.accent,
   },
   boldText: {
     fontWeight: '700',

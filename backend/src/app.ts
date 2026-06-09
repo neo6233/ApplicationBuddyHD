@@ -4,10 +4,24 @@ import cors from 'cors';
 import helmet from 'helmet';
 import morgan from 'morgan';
 import rateLimit from 'express-rate-limit';
+import os from 'os';
 import routes from './routes/routes';
 
 const app: Application = express();
-const PORT = process.env.PORT || 5000;
+const PORT = Number(process.env.PORT || 5000);
+const HOST = process.env.HOST || '0.0.0.0';
+
+const getLocalIpAddress = (): string | null => {
+  const networkInterfaces = os.networkInterfaces();
+  for (const interfaces of Object.values(networkInterfaces)) {
+    for (const iface of interfaces || []) {
+      if (iface.family === 'IPv4' && !iface.internal) {
+        return iface.address;
+      }
+    }
+  }
+  return null;
+};
 
 // Security
 app.use(helmet());
@@ -56,9 +70,13 @@ app.use(
   },
 );
 
-app.listen(PORT, () => {
-  console.log(`\n🚀 ARIA Backend running on http://localhost:${PORT}`);
-  console.log(`📡 Health check: http://localhost:${PORT}/api/health\n`);
+app.listen(PORT, HOST, () => {
+  const localIp = getLocalIpAddress();
+  const baseUrl = localIp ? `http://${localIp}:${PORT}` : `http://localhost:${PORT}`;
+
+  console.log(`\n🚀 ARIA Backend running on ${baseUrl}`);
+  console.log(`📡 Health check: ${baseUrl}/api/health`);
+  console.log(`🌐 Bind host: ${HOST}\n`);
 });
 
 export default app;

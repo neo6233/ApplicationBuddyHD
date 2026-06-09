@@ -19,10 +19,15 @@ STRICT RULES — follow every one of them, no exceptions:
 PROGRAM CATALOG:
 ${CATALOG_SNAPSHOT}`;
 
+// ─── Default system prompt for non-program queries (allows broader answers) ────
+const DEFAULT_SYSTEM_PROMPT = `You are ARIA, an AI Admission Counsellor.
+Reply helpfully and concisely; do not invent catalog entries. Use full answers when needed.
+Ask one follow-up question at a time if more information is needed.`;
+
 // ─── Ollama config — set OLLAMA_HOST in your .env if not running locally ──────
 const OLLAMA_CONFIG = {
   baseUrl: process.env.OLLAMA_BASE_URL || 'http://localhost:11434',
-  model:   process.env.OLLAMA_MODEL    || 'llama3.2',   // swap to any pulled model
+  model:   process.env.OLLAMA_MODEL    || 'gemma3:4b',   // swap to any pulled model
   timeoutMs: Number(process.env.OLLAMA_TIMEOUT_MS || 30000),
 };
 
@@ -72,6 +77,7 @@ export interface AssistantAnalysis {
 interface OllamaMessage {
   role: 'system' | 'user' | 'assistant';
   content: string;
+  images?: string[];
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -80,6 +86,11 @@ const normalize = (text: string) =>
 
 const includesAny = (text: string, keywords: string[]) =>
   keywords.some(kw => text.includes(kw));
+
+const normalizeImageData = (image?: string | null): string | undefined => {
+  if (!image) return undefined;
+  return image.replace(/^data:image\/[a-zA-Z0-9.+-]+;base64,/, '').trim();
+};
 
 const parseNumericScore = (input: string): number | undefined => {
   const n = normalize(input);
@@ -328,17 +339,47 @@ USER: ${userMessage}`;
     },
   ): Promise<string> {
     // Convert history to Ollama message format (images ignored — use vision model if needed)
+    const normalizedUserImage = normalizeImageData(options?.userImage);
     const messages: OllamaMessage[] = [
       ...history.map(msg => ({
         role: (msg.role === 'assistant' ? 'assistant' : 'user') as OllamaMessage['role'],
         content: msg.content,
+        images: normalizeImageData(msg.image) ? [normalizeImageData(msg.image)!] : undefined,
       })),
-      {role: 'user', content: userMessage},
+      {
+        role: 'user',
+        content: userMessage,
+        images: normalizedUserImage ? [normalizedUserImage] : undefined,
+      },
     ];
 
+    const hasImageAttachment = Boolean(normalizedUserImage);
+
+    const promptPrefix = hasImageAttachment
+      ? 'The user attached an image. Inspect the image carefully and answer based on what is visible in it.'
+      : '';
+
+    // Choose system prompt: use catalog-locked prompt only for program/course queries.
     try {
+      let selectedSystemPrompt: string | undefined = options?.systemPrompt;
+
+      if (!selectedSystemPrompt) {
+        let analysis: AssistantAnalysis | null = null;
+        try {
+          analysis = await this.analyzeConversation(userMessage, history);
+        } catch (e) {
+          analysis = null;
+        }
+
+        const isCourseTopic = analysis?.topic === 'course' || includesAny(normalize(userMessage), [
+          'program', 'course', 'degree', 'university', 'study abroad', 'intake', 'eligib', 'eligibility', 'intake', 'duration', 'admission', 'major', 'msc', 'mtech', 'mba', 'bachelor', 'master', 'phd'
+        ]);
+
+        selectedSystemPrompt = isCourseTopic ? SYSTEM_PROMPT : DEFAULT_SYSTEM_PROMPT;
+      }
+
       return await this.callOllama({
-        systemPrompt: options?.systemPrompt ?? SYSTEM_PROMPT,
+        systemPrompt: promptPrefix ? `${promptPrefix}\n\n${selectedSystemPrompt}` : selectedSystemPrompt,
         messages,
         temperature: options?.temperature ?? 0.2,
       });

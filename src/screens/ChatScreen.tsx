@@ -27,9 +27,13 @@ import {
   clearChatHistory,
   clearError,
 } from '../redux/slices/chatSlice';
+import {saveProgram} from '../redux/slices/programSlice';
 import {Message} from '../models/ChatModel';
+import {Program} from '../models/ProgramModel';
 import {captureVoiceText, isVoiceSupported, resetVoicePromise} from '../services/voiceService';
 import {pickImageFromGallery} from '../services/imagePicker';
+import {speak, stopSpeaking} from '../services/ttsService';
+import {PROGRAM_CATALOG} from '../data/programCatalog';
 
 type Props = {
   navigation: NativeStackNavigationProp<RootStackParamList, 'Chat'>;
@@ -61,16 +65,59 @@ const WelcomeMessage: React.FC<{
 
 const ChatScreen: React.FC<Props> = () => {
   const dispatch = useAppDispatch();
-  const {messages, isTyping, error} = useAppSelector(s => s.chat);
+  const {messages, isTyping, error, hydratedMessageCount} = useAppSelector(s => s.chat);
+  const savedPrograms = useAppSelector(s => s.programs.savedPrograms);
 
   const [inputText, setInputText] = useState('');
   const [isListening, setIsListening] = useState(false);
   const [userImage, setUserImage] = useState<string | null>(null);
+  const lastSpokenAssistantMessageId = useRef<string | null>(null);
+  const shouldSpeakNextReplyRef = useRef(false);
   const flatListRef = useRef<FlatList>(null);
   const inputRef = useRef<TextInput>(null);
 
   // Show welcome message if no history
   const hasWelcomeMessage = messages.length === 0;
+
+  const normalize = (text: string) =>
+    text.toLowerCase().replace(/[\u2018\u2019]/g, "'").replace(/\s+/g, ' ').trim();
+
+  const isSaveIntent = (text: string) => {
+    const normalized = normalize(text);
+    return [
+      'save this program',
+      'save program',
+      'save it',
+      'add to saved',
+      'add this to saved',
+      'bookmark',
+      'favorite',
+      'favourite',
+      'store this program',
+    ].some(keyword => normalized.includes(keyword));
+  };
+
+  const findProgramFromText = (text: string): Program | null => {
+    const normalized = normalize(text);
+    const match = PROGRAM_CATALOG.find(program => normalized.includes(normalize(program.name)));
+    return match ? {...match, matchScore: 0} : null;
+  };
+
+  const isProgramSaved = useCallback(
+    (program: Program) =>
+      savedPrograms.some(
+        saved => saved.name === program.name && saved.university === program.university,
+      ),
+    [savedPrograms],
+  );
+
+  const handleSaveProgram = useCallback(
+    async (program: Program) => {
+      await dispatch(saveProgram(program));
+      Alert.alert('Saved!', `${program.name} has been added to your saved programs.`);
+    },
+    [dispatch],
+  );
 
 useEffect(() => {
      if (error) {
@@ -87,6 +134,51 @@ useEffect(() => {
   useEffect(() => {
     scrollToBottom();
   }, [messages, isTyping, scrollToBottom]);
+
+  useEffect(() => {
+    const latestAssistantIndex = [...messages]
+      .map((m, index) => ({m, index}))
+      .reverse()
+      .find(entry => entry.m.role === 'assistant' && entry.m.content?.trim())?.index;
+    const latestAssistantMessage =
+      latestAssistantIndex !== undefined ? messages[latestAssistantIndex] : undefined;
+
+    if (!latestAssistantMessage) {
+      lastSpokenAssistantMessageId.current = null;
+      return;
+    }
+
+    if (!shouldSpeakNextReplyRef.current) {
+      lastSpokenAssistantMessageId.current = latestAssistantMessage.id;
+      return;
+    }
+
+    if (lastSpokenAssistantMessageId.current === latestAssistantMessage.id) {
+      return;
+    }
+
+    const triggeringUserMessage =
+      latestAssistantIndex !== undefined && latestAssistantIndex > 0
+        ? [...messages].slice(0, latestAssistantIndex).reverse().find(m => m.role === 'user')
+        : undefined;
+
+    if (triggeringUserMessage?.inputMode !== 'voice') {
+      lastSpokenAssistantMessageId.current = latestAssistantMessage.id;
+      return;
+    }
+
+    lastSpokenAssistantMessageId.current = latestAssistantMessage.id;
+    shouldSpeakNextReplyRef.current = false;
+
+    void (async () => {
+      try {
+        await stopSpeaking();
+        await speak(latestAssistantMessage.content);
+      } catch (error) {
+        console.warn('[ChatScreen] TTS failed:', error);
+      }
+    })();
+  }, [messages]);
 
   const clearPendingImage = useCallback(() => {
     setUserImage(null);
@@ -119,19 +211,37 @@ useEffect(() => {
       addUserMessage({
         content: text || 'Attached an image',
         image: imageToSend,
+        inputMode: overrideImage === null ? 'voice' : 'text',
       }),
     );
 
-    await dispatch(
+    const resultAction = await dispatch(
       sendMessage({
         userMessage: text || 'Attached an image',
         history: historyForSend,
         image: imageToSend,
       }),
     );
+
+    if (sendMessage.fulfilled.match(resultAction)) {
+      const payload = resultAction.payload;
+
+      if (isSaveIntent(text)) {
+        const programFromReply = payload.programs?.[0] as Program | undefined;
+        const programFromText = programFromReply || findProgramFromText(historyForSend.map(m => m.content).join(' ')) || findProgramFromText(text);
+
+        if (programFromText) {
+          await dispatch(saveProgram(programFromText));
+          Alert.alert('Saved!', `${programFromText.name} has been added to your saved programs.`);
+        } else {
+          Alert.alert('Save program', 'I could not identify which program to save. Please mention the program name.');
+        }
+      }
+    }
   }, [messages, userImage, dispatch]);
 
   const handleSend = useCallback(async () => {
+    shouldSpeakNextReplyRef.current = false;
     await sendText(inputText);
   }, [inputText, sendText]);
 
@@ -146,8 +256,9 @@ useEffect(() => {
 
     try {
       setIsListening(true);
+      shouldSpeakNextReplyRef.current = true;
       const result = await captureVoiceText({
-        locale: 'en-US',
+        locale: 'en-IN',
         onTranscript: text => setInputText(text),
       });
       console.log('Voice capture result:', result);
@@ -159,12 +270,14 @@ useEffect(() => {
 
       const transcript = result.transcript.trim();
       if (!transcript) {
+        shouldSpeakNextReplyRef.current = false;
         return;
       }
 
       setInputText(transcript);
       await sendText(transcript, null);
     } catch (error: any) {
+      shouldSpeakNextReplyRef.current = false;
       Alert.alert('Voice input', error?.message || 'Failed to process voice');
     } finally {
       setIsListening(false);
@@ -177,14 +290,33 @@ useEffect(() => {
       {
         text: Strings.BTN_CONFIRM,
         style: 'destructive',
-        onPress: () => dispatch(clearChatHistory()),
+        onPress: () => {
+          lastSpokenAssistantMessageId.current = null;
+          stopSpeaking();
+          dispatch(clearChatHistory());
+        },
       },
     ]);
   }, [dispatch]);
 
-  const renderItem = useCallback(({item}: {item: Message}) => {
-    return <ChatBubble message={item} />;
+  useEffect(() => {
+    return () => {
+      stopSpeaking();
+    };
   }, []);
+
+  const renderItem = useCallback(
+    ({item}: {item: Message}) => {
+      return (
+        <ChatBubble
+          message={item}
+          onSaveProgram={program => handleSaveProgram(program as Program)}
+          isProgramSaved={program => isProgramSaved(program as Program)}
+        />
+      );
+    },
+    [handleSaveProgram, isProgramSaved],
+  );
 
   return (
     <SafeAreaView style={styles.container}>
