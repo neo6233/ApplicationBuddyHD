@@ -1,6 +1,13 @@
 "use strict";
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.buildLocalProgramResponse = void 0;
+const fs_1 = __importDefault(require("fs"));
+const path_1 = __importDefault(require("path"));
+const dotenv_1 = __importDefault(require("dotenv"));
+const generative_ai_1 = require("@google/generative-ai");
 const programCatalog_1 = require("../data/programCatalog");
 // ─── Catalog snapshot injected into every prompt ─────────────────────────────
 const CATALOG_SNAPSHOT = programCatalog_1.PROGRAM_CATALOG.map(p => `• ${p.name} | ${p.university} | ${p.country} | ${p.duration} | Intake: ${p.intake} | Min: ${p.eligibility}`).join('\n');
@@ -27,11 +34,33 @@ const DEFAULT_SYSTEM_PROMPT = `You are ARIA, an AI Admission Counsellor.
 - If user speaks ENGLISH: Reply ONLY in English. NO Hindi words EVER.
 
 Reply concisely in one sentence. Do not invent programs not in catalog.`;
-// ─── Ollama config — set OLLAMA_HOST in your .env if not running locally ──────
-const OLLAMA_CONFIG = {
-    baseUrl: process.env.OLLAMA_BASE_URL || 'http://localhost:11434',
-    model: process.env.OLLAMA_MODEL || 'gemma3:4b', // swap to any pulled model
-    timeoutMs: Number(process.env.OLLAMA_TIMEOUT_MS || 30000),
+// ─── Gemini config ──────────────────────────────────────────────────────────
+const GEMINI_ENV_FILE = path_1.default.resolve(__dirname, '../../.env');
+let lastGeminiEnvMtimeMs = 0;
+const refreshGeminiEnv = () => {
+    try {
+        const stats = fs_1.default.statSync(GEMINI_ENV_FILE);
+        if (stats.mtimeMs <= lastGeminiEnvMtimeMs) {
+            return;
+        }
+        const fileContents = fs_1.default.readFileSync(GEMINI_ENV_FILE, 'utf8');
+        const parsed = dotenv_1.default.parse(fileContents);
+        for (const [key, value] of Object.entries(parsed)) {
+            process.env[key] = value;
+        }
+        lastGeminiEnvMtimeMs = stats.mtimeMs;
+    }
+    catch {
+        // Ignore missing or unreadable env files; runtime env stays in effect.
+    }
+};
+const getGeminiConfig = () => {
+    refreshGeminiEnv();
+    return {
+        apiKey: process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || '',
+        model: process.env.GEMINI_MODEL || 'gemini-2.5-flash',
+        timeoutMs: Number(process.env.GEMINI_TIMEOUT_MS || 12000),
+    };
 };
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 const normalize = (text) => text.toLowerCase().replace(/[\u2018\u2019]/g, "'").replace(/\s+/g, ' ').trim();
@@ -62,6 +91,32 @@ const normalizeImageData = (image) => {
     if (!image)
         return undefined;
     return image.replace(/^data:image\/[a-zA-Z0-9.+-]+;base64,/, '').trim();
+};
+const extractImageMimeType = (image) => {
+    const match = image?.match(/^data:(image\/[a-zA-Z0-9.+-]+);base64,/i);
+    return match?.[1] || 'image/jpeg';
+};
+const toGeminiParts = (text, image) => {
+    const parts = [{ text }];
+    const normalizedImage = normalizeImageData(image);
+    if (normalizedImage) {
+        parts.push({
+            inlineData: {
+                mimeType: extractImageMimeType(image),
+                data: normalizedImage,
+            },
+        });
+    }
+    return parts;
+};
+const safeJsonParse = (text) => {
+    try {
+        const cleaned = text.replace(/```json\s*/gi, '').replace(/```\s*/g, '').trim();
+        return JSON.parse(cleaned);
+    }
+    catch {
+        return null;
+    }
 };
 const parseNumericScore = (input) => {
     const n = normalize(input);
@@ -150,7 +205,7 @@ const scoreCatalogItem = (item, data) => {
         total += 10;
     return Math.max(35, Math.min(98, total));
 };
-// ─── Local fallback for offline / unreachable Ollama ─────────────────────────
+// ─── Local fallback for offline / unreachable Gemini ────────────────────────
 const buildLocalFallbackReply = (userMessage, language = 'en') => {
     const msg = normalize(userMessage);
     if (includesAny(msg, ['duration', 'how long', 'years', 'months'])) {
@@ -218,64 +273,46 @@ const parseAssistantAnalysis = (text) => {
         return null;
     }
 };
-// ─── OllamaService (same public API as the old GeminiService) ─────────────────
-class OllamaService {
+// ─── GeminiService (same public API as the old service) ─────────────────────
+class GeminiService {
+    getClient() {
+        const { apiKey } = getGeminiConfig();
+        return new generative_ai_1.GoogleGenerativeAI(apiKey);
+    }
     isEnabled() {
-        return Boolean(OLLAMA_CONFIG.baseUrl);
+        return Boolean(getGeminiConfig().apiKey);
     }
-    buildUrl() {
-        return `${OLLAMA_CONFIG.baseUrl.replace(/\/+$/, '')}/api/chat`;
+    getModel(systemPrompt) {
+        const { model } = getGeminiConfig();
+        return this.getClient().getGenerativeModel({
+            model,
+            systemInstruction: systemPrompt || undefined,
+        });
     }
-    /**
-     * Core Ollama call using /api/chat (OpenAI-compatible message format).
-     * stream is always false so we get a single JSON response.
-     */
-    async callOllama(payload) {
+    async callGemini(payload) {
         if (!this.isEnabled()) {
-            throw new Error('OLLAMA_BASE_URL is not configured');
+            throw new Error('GEMINI_API_KEY is not configured');
         }
-        const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), OLLAMA_CONFIG.timeoutMs);
-        // Prepend system message if provided
-        const allMessages = [
-            { role: 'system', content: payload.systemPrompt ?? SYSTEM_PROMPT },
-            ...payload.messages,
-        ];
-        try {
-            const response = await fetch(this.buildUrl(), {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    model: OLLAMA_CONFIG.model,
-                    messages: allMessages,
-                    stream: false,
-                    options: {
-                        temperature: payload.temperature ?? 0.2,
-                        num_predict: 120, // max tokens — keeps replies short
-                        top_p: 0.9,
-                    },
-                    ...(payload.jsonMode ? { format: 'json' } : {}),
-                }),
-                signal: controller.signal,
-            });
-            const rawText = await response.text();
-            const data = rawText ? JSON.parse(rawText) : {};
-            if (!response.ok) {
-                const errorMessage = data?.error || `Ollama error ${response.status}`;
-                const err = new Error(errorMessage);
-                err.status = response.status;
-                throw err;
-            }
-            // Ollama /api/chat returns { message: { role, content } }
-            const reply = data?.message?.content?.trim() || '';
-            if (!reply)
-                throw new Error('Ollama returned an empty response.');
-            console.log('[OllamaService] Reply:', reply.slice(0, 120));
-            return reply;
+        const { timeoutMs } = getGeminiConfig();
+        const timeoutPromise = new Promise((_, reject) => {
+            setTimeout(() => reject(new Error('Gemini request timed out')), timeoutMs);
+        });
+        const generatePromise = this.getModel(payload.systemPrompt).generateContent({
+            contents: payload.messages,
+            generationConfig: {
+                temperature: payload.temperature ?? 0.2,
+                topP: 0.9,
+                maxOutputTokens: payload.maxOutputTokens ?? 120,
+                responseMimeType: payload.jsonMode ? 'application/json' : undefined,
+            },
+        });
+        const result = await Promise.race([generatePromise, timeoutPromise]);
+        const reply = result.response.text().trim();
+        if (!reply) {
+            throw new Error('Gemini returned an empty response.');
         }
-        finally {
-            clearTimeout(timeout);
-        }
+        console.log('[GeminiService] Reply:', reply.slice(0, 120));
+        return reply;
     }
     // ── analyzeConversation ────────────────────────────────────────────────────
     async analyzeConversation(userMessage, history) {
@@ -311,35 +348,34 @@ Conversation:
 ${conversationText}
 USER: ${userMessage}`;
         try {
-            const raw = await this.callOllama({
+            const raw = await this.callGemini({
                 systemPrompt: 'You are a strict JSON analyzer. Extract ALL available student profile information from the conversation. Return valid JSON only, no extra text.',
-                messages: [{ role: 'user', content: prompt }],
+                messages: [{ role: 'user', parts: [{ text: prompt }] }],
                 temperature: 0,
                 jsonMode: true,
+                maxOutputTokens: 256,
             });
-            const analysis = parseAssistantAnalysis(raw);
+            const analysis = safeJsonParse(raw) || parseAssistantAnalysis(raw);
             console.log('[PARSED ANALYSIS]', JSON.stringify(analysis, null, 2));
             return analysis;
         }
         catch (err) {
-            console.warn('[OllamaService] analyzeConversation error — defaulting to general:', err.message);
+            console.warn('[GeminiService] analyzeConversation error — defaulting to general:', err.message);
             return { topic: 'general', confidence: 0.5, needsMoreInfo: false, summary: 'Fallback: error' };
         }
     }
     // ── chat ───────────────────────────────────────────────────────────────────
     async chat(userMessage, history, options) {
-        // Convert history to Ollama message format (images ignored — use vision model if needed)
+        // Convert history to Gemini message format.
         const normalizedUserImage = normalizeImageData(options?.userImage);
         const messages = [
             ...history.map(msg => ({
-                role: (msg.role === 'assistant' ? 'assistant' : 'user'),
-                content: msg.content,
-                images: normalizeImageData(msg.image) ? [normalizeImageData(msg.image)] : undefined,
+                role: (msg.role === 'assistant' ? 'model' : 'user'),
+                parts: toGeminiParts(msg.content, msg.image),
             })),
             {
                 role: 'user',
-                content: userMessage,
-                images: normalizedUserImage ? [normalizedUserImage] : undefined,
+                parts: toGeminiParts(userMessage, normalizedUserImage),
             },
         ];
         const hasImageAttachment = Boolean(normalizedUserImage);
@@ -364,20 +400,21 @@ USER: ${userMessage}`;
                 selectedSystemPrompt = isCourseTopic ? SYSTEM_PROMPT : DEFAULT_SYSTEM_PROMPT;
             }
             const languageInstruction = buildLanguageInstruction(replyLanguage);
-            return await this.callOllama({
+            return await this.callGemini({
                 systemPrompt: promptPrefix
                     ? `${promptPrefix}\n\n${selectedSystemPrompt}\n\n${languageInstruction}`
                     : `${selectedSystemPrompt}\n\n${languageInstruction}`,
                 messages,
                 temperature: options?.temperature ?? 0.2,
+                maxOutputTokens: options?.maxOutputTokens ?? 256,
             });
         }
         catch (err) {
-            console.warn('[OllamaService] chat error — using local catalog fallback:', err.message);
+            console.warn('[GeminiService] chat error — using local catalog fallback:', err.message);
             const localReply = buildLocalFallbackReply(userMessage, replyLanguage);
             if (localReply)
                 return localReply;
-            return "Ollama is unreachable right now. Please ensure it is running on your server.";
+            return 'Gemini is unreachable right now. Please check your API key and network connection.';
         }
     }
     // ── checkEligibility ───────────────────────────────────────────────────────
@@ -386,13 +423,14 @@ USER: ${userMessage}`;
 Schema: {"eligibleCourses":[{"name":"","university":"","country":"","minimumRequirement":"","status":"eligible","reason":""}],"notEligibleCourses":[{"name":"","university":"","country":"","minimumRequirement":"","status":"not_eligible","reason":""}],"summary":"","recommendations":[]}
 Student: qualification=${data.qualification}, percentage=${data.percentage}, english=${data.englishScore}, experience=${data.workExperience || 'None'}
 Only use programs from the catalog. Status: eligible | conditional | not_eligible. Give 3 eligible and 2 not-eligible.`;
-        return this.callOllama({
+        return this.callGemini({
             systemPrompt: 'You are ARIA. Answer strictly from the catalog. Return JSON only.',
-            messages: [{ role: 'user', content: prompt }],
+            messages: [{ role: 'user', parts: [{ text: prompt }] }],
             temperature: 0.1,
             jsonMode: true,
+            maxOutputTokens: 1024,
         });
     }
 }
-exports.default = new OllamaService();
+exports.default = new GeminiService();
 //# sourceMappingURL=GeminiService.js.map

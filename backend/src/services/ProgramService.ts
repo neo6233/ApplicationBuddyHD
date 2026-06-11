@@ -1,5 +1,15 @@
 import { PROGRAM_CATALOG, ProgramCatalogItem as Program } from '../data/programCatalog';
 
+type ProgramLevel = Program['level'];
+
+interface ProgramSearchFilters {
+  qualification?: string;
+  gpa?: string;
+  interests?: string;
+  preferredCountry?: string;
+  targetLevel?: ProgramLevel | 'Any';
+}
+
 const normalize = (text: string) =>
   text
     .toLowerCase()
@@ -33,13 +43,21 @@ const parseNumericScore = (input: string): number | undefined => {
   return undefined;
 };
 
-const inferLevel = (qualification: string): 'UG' | 'PG' | 'Diploma' | 'Any' => {
+const inferQualificationLevel = (qualification: string): ProgramLevel | 'Any' => {
   const text = normalize(qualification);
   if (includesAny(text, ['phd', 'doctorate'])) return 'PG';
   if (includesAny(text, ['master', 'msc', 'ma', 'mtech', 'mba', 'pg'])) return 'PG';
   if (includesAny(text, ['diploma', 'certificate'])) return 'Diploma';
   if (includesAny(text, ['bachelor', 'be', 'btech', 'b.sc', 'bba', 'undergraduate'])) return 'UG';
   if (includesAny(text, ['high school', 'secondary', '12th', '10th'])) return 'UG';
+  return 'Any';
+};
+
+const inferTargetLevel = (text: string): ProgramLevel | 'Any' => {
+  const normalized = normalize(text);
+  if (includesAny(normalized, ['master', 'masters', 'msc', 'mtech', 'mba', 'postgraduate', 'pg course'])) return 'PG';
+  if (includesAny(normalized, ['diploma', 'certificate'])) return 'Diploma';
+  if (includesAny(normalized, ['bachelor', 'undergraduate', 'ug course', 'degree after 12th'])) return 'UG';
   return 'Any';
 };
 
@@ -62,12 +80,19 @@ const inferField = (text: string): string | undefined => {
 };
 
 class ProgramService {
-  search(filters: any): Program[] {
+  search(filters: ProgramSearchFilters): Program[] {
     console.log('[PROGRAM SEARCH FILTER]', filters);
 
     const { qualification, gpa, interests, preferredCountry } = filters;
+    const targetLevel = filters.targetLevel && filters.targetLevel !== 'Any'
+      ? filters.targetLevel
+      : inferTargetLevel(`${interests || ''} ${qualification || ''}`);
 
-    const selected = [...PROGRAM_CATALOG]
+    const candidateCatalog = targetLevel !== 'Any'
+      ? PROGRAM_CATALOG.filter(item => item.level === targetLevel)
+      : PROGRAM_CATALOG;
+
+    const selected = [...candidateCatalog]
       .map(item => ({
         item,
         matchScore: this.scoreCatalogItem(item, { qualification, gpa, interests, preferredCountry }),
@@ -97,11 +122,11 @@ class ProgramService {
     return PROGRAM_CATALOG;
   }
 
-  private scoreCatalogItem(item: Program, data: any): number {
+  private scoreCatalogItem(item: Program, data: ProgramSearchFilters): number {
     const qualificationText = normalize(data.qualification || '');
     const interestsText = normalize(data.interests || '');
     const countryText = normalize(data.preferredCountry || '');
-    const level = inferLevel(data.qualification || '');
+    const qualificationLevel = inferQualificationLevel(data.qualification || '');
     const score = parseNumericScore(data.gpa || '');
 
     let total = 45;
@@ -110,11 +135,13 @@ class ProgramService {
       total += 20;
     }
 
-    if (level === item.level || level === 'Any') {
+    if (qualificationLevel === 'UG' && item.level === 'PG') {
+      total -= 45;
+    } else if (qualificationLevel === item.level || qualificationLevel === 'Any') {
       total += 20;
-    } else if (level === 'UG' && item.level === 'Diploma') {
+    } else if (qualificationLevel === 'UG' && item.level === 'Diploma') {
       total += 10;
-    } else if (level === 'PG' && item.level !== 'UG') {
+    } else if (qualificationLevel === 'PG' && item.level !== 'UG') {
       total += 10;
     }
 

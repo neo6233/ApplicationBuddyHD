@@ -36,14 +36,11 @@ export interface AssistantAnalysis {
     };
 }
 export declare const buildLocalProgramResponse: (data: ProgramFinderInput) => ProgramFinderResponse;
-declare class OllamaService {
+declare class GeminiService {
+    private getClient;
     private isEnabled;
-    private buildUrl;
-    /**
-     * Core Ollama call using /api/chat (OpenAI-compatible message format).
-     * stream is always false so we get a single JSON response.
-     */
-    private callOllama;
+    private getModel;
+    private callGemini;
     analyzeConversation(userMessage: string, history: Array<{
         role: 'user' | 'assistant';
         content: string;
@@ -67,6 +64,6 @@ declare class OllamaService {
         workExperience: string;
     }): Promise<string>;
 }
-declare const _default: OllamaService;
+declare const _default: GeminiService;
 export default _default;
 //# sourceMappingURL=GeminiService.d.ts.map

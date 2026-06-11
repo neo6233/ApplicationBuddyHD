@@ -3,16 +3,15 @@
 // To point the app at a live server, set BACKEND_URL in your environment.
 // Example: BACKEND_URL=https://aria-backend.onrender.com
 
-import {Platform} from 'react-native';
-import {BACKEND_URL as backendUrl} from '../config/backend';
+import {BACKEND_URL} from '../config/backend';
 
-export const BASE_URL = backendUrl || (Platform.OS === 'android' ? 'http://10.132.248.142:5000' : 'http://10.132.248.142:5000');
+export const BASE_URL = BACKEND_URL;
 
 const Endpoints = {
-  CHAT: '/api/chat',
-  PROGRAM_FINDER: '/api/program-finder',
-  ELIGIBILITY_CHECK: '/api/eligibility-check',
-  HEALTH: '/api/health',
+  CHAT: '/chat',
+  PROGRAM_FINDER: '/program-finder',
+  ELIGIBILITY_CHECK: '/eligibility-check',
+  HEALTH: '/health',
 };
 
 export default Endpoints;
