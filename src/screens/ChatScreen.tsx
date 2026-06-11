@@ -10,7 +10,6 @@ import {
   Platform,
   Alert,
   StatusBar,
-  ActionSheetIOS,
 } from 'react-native';
 import {NativeStackNavigationProp} from '@react-navigation/native-stack';
 import {RootStackParamList} from '../navigation/AppNavigator';
@@ -23,6 +22,7 @@ import useAppDispatch from '../redux/hooks/useAppDispatch';
 import useAppSelector from '../redux/hooks/useAppSelector';
 import {
   addUserMessage,
+  addAssistantMessage,
   sendMessage,
   clearChatHistory,
   clearError,
@@ -63,9 +63,11 @@ const WelcomeMessage: React.FC<{
   </View>
 );
 
+import {isSaveIntent, findProgramFromText} from '../services/ChatEngine';
+
 const ChatScreen: React.FC<Props> = () => {
   const dispatch = useAppDispatch();
-  const {messages, isTyping, error, hydratedMessageCount} = useAppSelector(s => s.chat);
+  const {messages, isTyping, error} = useAppSelector(s => s.chat);
   const savedPrograms = useAppSelector(s => s.programs.savedPrograms);
 
   const [inputText, setInputText] = useState('');
@@ -78,30 +80,6 @@ const ChatScreen: React.FC<Props> = () => {
 
   // Show welcome message if no history
   const hasWelcomeMessage = messages.length === 0;
-
-  const normalize = (text: string) =>
-    text.toLowerCase().replace(/[\u2018\u2019]/g, "'").replace(/\s+/g, ' ').trim();
-
-  const isSaveIntent = (text: string) => {
-    const normalized = normalize(text);
-    return [
-      'save this program',
-      'save program',
-      'save it',
-      'add to saved',
-      'add this to saved',
-      'bookmark',
-      'favorite',
-      'favourite',
-      'store this program',
-    ].some(keyword => normalized.includes(keyword));
-  };
-
-  const findProgramFromText = (text: string): Program | null => {
-    const normalized = normalize(text);
-    const match = PROGRAM_CATALOG.find(program => normalized.includes(normalize(program.name)));
-    return match ? {...match, matchScore: 0} : null;
-  };
 
   const isProgramSaved = useCallback(
     (program: Program) =>
@@ -215,6 +193,41 @@ useEffect(() => {
       }),
     );
 
+    if (isSaveIntent(text)) {
+      const detectedLanguage: 'hi' | 'en' = /[\u0900-\u097F]/.test(text) ? 'hi' : 'en';
+      const textHistory = historyForSend.map(m => m.content).join(' ');
+      const programToSave = findProgramFromText(text) || findProgramFromText(textHistory);
+
+      if (programToSave) {
+        await dispatch(saveProgram({...programToSave, matchScore: 0} as unknown as Program));
+        dispatch(
+          addAssistantMessage({
+            content:
+              detectedLanguage === 'hi'
+                ? `${programToSave.name} आपके saved programs में जोड़ दिया गया है.`
+                : `${programToSave.name} has been added to your saved programs.`,
+            responseLanguage: detectedLanguage,
+            responseType: 'general',
+            timestamp: Date.now(),
+          }),
+        );
+      } else {
+        dispatch(
+          addAssistantMessage({
+            content:
+              detectedLanguage === 'hi'
+                ? 'कृपया प्रोग्राम का नाम लिखिए ताकि मैं उसे save कर सकूँ.'
+                : 'Please mention the program name so I can save it.',
+            responseLanguage: detectedLanguage,
+            responseType: 'general',
+            timestamp: Date.now(),
+          }),
+        );
+      }
+
+      return;
+    }
+
     const resultAction = await dispatch(
       sendMessage({
         userMessage: text || 'Attached an image',
@@ -231,7 +244,7 @@ useEffect(() => {
         const programFromText = programFromReply || findProgramFromText(historyForSend.map(m => m.content).join(' ')) || findProgramFromText(text);
 
         if (programFromText) {
-          await dispatch(saveProgram(programFromText));
+          await dispatch(saveProgram({...programFromText, matchScore: 0} as unknown as Program));
           Alert.alert('Saved!', `${programFromText.name} has been added to your saved programs.`);
         } else {
           Alert.alert('Save program', 'I could not identify which program to save. Please mention the program name.');
@@ -294,7 +307,7 @@ useEffect(() => {
     } finally {
       setIsListening(false);
     }
-  }, [sendText]);
+  }, [sendText, detectVoiceLocale]);
 
   const handleClearChat = useCallback(() => {
     Alert.alert(Strings.CHAT_CLEAR, Strings.CHAT_CLEAR_CONFIRM, [

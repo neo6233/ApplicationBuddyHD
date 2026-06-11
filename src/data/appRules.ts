@@ -70,13 +70,13 @@ export const APP_RULES: AppRule[] = [
     id: 'no_repeat',
     priority: 97,
     keywords: ['again', 'repeat', 'recommend', 'computer', 'course', 'program', 'courses', 'programs'],
-    text: 'Never output the same recommendation list of programs twice. If you have already recommended a set of programs, focus on addressing the user’s follow-up query directly or ask clarifying questions.',
+    text: 'Never output the same recommendation list of programs twice. If you have already recommended a set of programs, focus on addressing the user\u2019s follow-up query directly or ask clarifying questions.',
   },
   {
     id: 'detail_vs_list',
     priority: 98,
     keywords: ['bachelor', 'master', 'diploma', 'science', 'technology', 'management', 'engineering'],
-    text: 'When the user mentions one specific program name (e.g. "Bachelor of Computer Science" or "बैचलर ऑफ़ कंप्यूटर साइंस"), provide information or details about that specific program instead of listing other different courses.',
+    text: 'When the user mentions one specific program name (e.g. "Bachelor of Computer Science" or "\u092C\u0948\u091A\u0932\u0930 \u0911\u092B\u093C \u0915\u0902\u092A\u094D\u092F\u0942\u091F\u0930 \u0938\u093E\u0907\u0902\u0938"), provide information or details about that specific program instead of listing other different courses.',
   },
 ];
 

@@ -1,19 +1,37 @@
-import {Request, Response} from 'express';
-import GeminiService from '../services/GeminiService'; // Gemini-backed service with the same controller API
-import ProgramService from '../services/ProgramService';
-import {PROGRAM_CATALOG, ProgramCatalogItem} from '../data/programCatalog';
-import {findRelevantAppRules} from '../data/appRules';
-import VectorKnowledgeService, {KnowledgeHit} from '../services/VectorKnowledgeService';
+import { PROGRAM_CATALOG, ProgramCatalogItem } from '../data/programCatalog';
+import { findRelevantAppRules } from '../data/appRules';
+import VectorKnowledge from './VectorKnowledge';
+import ProgramService from './ProgramService';
+import { directGeminiChat, analyzeConversation, AssistantAnalysis } from './directGemini';
 
-type ProgramLevel = ProgramCatalogItem['level'];
-type QuestionIntent = 'career' | 'opinion' | 'best_fit' | 'alternative' | 'compare' | 'detail';
-
-type ConversationMessage = {
+export interface ConversationMessage {
   role: 'user' | 'assistant';
   content: string;
   image?: string | null;
+  programs?: Array<{
+    name: string;
+    university: string;
+    country: string;
+    duration: string;
+    intake: string;
+    eligibility: string;
+    careerOpportunities: string[];
+    [key: string]: any;
+  }>;
+}
+
+export interface ChatEngineResponse {
+  reply: string;
+  responseLanguage: 'hi' | 'en';
+  responseType?: 'save_confirmation' | 'detail' | 'recommendation' | 'general';
   programs?: ProgramCatalogItem[];
-};
+  rules?: string[];
+  knowledge?: string[];
+  timestamp: number;
+}
+
+type ProgramLevel = ProgramCatalogItem['level'];
+type QuestionIntent = 'career' | 'opinion' | 'best_fit' | 'alternative' | 'compare' | 'detail';
 
 const normalize = (text: string) =>
   text.toLowerCase().replace(/[\u2018\u2019]/g, "'").replace(/\s+/g, ' ').trim();
@@ -110,24 +128,24 @@ const extractProfileLocally = (message: string, history: ConversationMessage[]) 
   const scoreMatch = fullText.match(/(\d{1,3})%/);
   const score = scoreMatch ? scoreMatch[1] : '';
   
-  return {level, field, score};
+  return { level, field, score };
 };
 
 const containsDevanagari = (message: string) => /[\u0900-\u097F]/.test(message);
 
 const detectResponseLanguage = (message: string, _history: ConversationMessage[]): 'en' | 'hi' => {
-  // Decide from the current message only so one Hindi turn does not lock the whole thread.
-  if (containsDevanagari(message)) return 'hi' as const;
+  if (containsDevanagari(message)) return 'hi';
 
-  // Check for common Hindi question words
   const normalized = normalize(message);
-  const hindiIndicators = [' mujhe ', ' kya ', ' kaise ', ' kyu ', ' kyun ', ' batao ', ' chahiye ', ' karna ', ' kaun ', ' kis ', ' aap ', ' hai ', ' hain ', ' aapka ', ' mere '];
+  const hindiIndicators = [
+    ' mujhe ', ' kya ', ' kaise ', ' kyu ', ' kyun ', ' batao ', ' chahiye ',
+    ' karna ', ' kaun ', ' kis ', ' aap ', ' hai ', ' hain ', ' aapka ', ' mere '
+  ];
   if (hindiIndicators.some(indicator => normalized.includes(indicator))) {
-    return 'hi' as const;
+    return 'hi';
   }
   
-  // Default to English for ambiguous cases
-  return 'en' as const;
+  return 'en';
 };
 
 const isGreetingMessage = (text: string) => {
@@ -186,7 +204,7 @@ const TRANSLITERATION_MAP: Record<string, string> = {
   'सावे': 'save',
 };
 
-const transliterateText = (text: string): string => {
+export const transliterateText = (text: string): string => {
   let normalized = text.toLowerCase();
   const phrases = [
     { key: 'better of', val: 'bachelor of' },
@@ -214,7 +232,7 @@ const transliterateText = (text: string): string => {
   return mappedWords.join(' ');
 };
 
-const isSaveIntent = (text: string): boolean => {
+export const isSaveIntent = (text: string): boolean => {
   const transliterated = transliterateText(text);
   const normalized = normalize(transliterated);
   const hasPhraseIntent = [
@@ -243,11 +261,7 @@ const isSaveIntent = (text: string): boolean => {
   return ['save', 'सेव', 'बचाओ', 'रखो'].some(kw => words.includes(kw) || origWords.includes(kw));
 };
 
-// const PROGRAM_NAME_LIST = [...PROGRAM_CATALOG]
-//   .map(program => program.name)
-//   .sort((a, b) => b.length - a.length);
-
-const findProgramMentions = (text: string): ProgramCatalogItem[] => {
+export const findProgramMentions = (text: string): ProgramCatalogItem[] => {
   const transliterated = transliterateText(text);
   const normalized = normalize(transliterated);
   const matches: ProgramCatalogItem[] = [];
@@ -259,7 +273,7 @@ const findProgramMentions = (text: string): ProgramCatalogItem[] => {
     }
   });
   
-  // If no exact matches, try partial matching (first few key words)
+  // If no exact matches, try partial matching
   if (matches.length === 0) {
     PROGRAM_CATALOG.forEach(program => {
       const programWords = normalize(program.name).split(' ');
@@ -275,6 +289,10 @@ const findProgramMentions = (text: string): ProgramCatalogItem[] => {
   return matches;
 };
 
+export const findProgramFromText = (text: string): ProgramCatalogItem | null => {
+  return findProgramMentions(text)[0] || null;
+};
+
 const getCatalogProgramByName = (programName?: string) => {
   if (!programName) {
     return null;
@@ -286,7 +304,7 @@ const getCatalogProgramByName = (programName?: string) => {
 
 const isFollowUpProgramQuestion = (text: string) => {
   const normalized = normalize(text);
-  return /it/i.test(normalized) || includesAny(normalized, [
+  return / it /i.test(normalized) || includesAny(normalized, [
     'this course',
     'that course',
     'this program',
@@ -334,7 +352,7 @@ const getLastRecommendedProgram = (history: ConversationMessage[]): ProgramCatal
     const message = history[i];
 
     if (message.programs?.length) {
-      return getCatalogProgramByName(message.programs[0].name) || message.programs[0];
+      return getCatalogProgramByName(message.programs[0].name) || (message.programs[0] as unknown as ProgramCatalogItem);
     }
 
     const mentions = findProgramMentions(message.content);
@@ -392,12 +410,11 @@ const resolveProgramFromKeywords = (message: string): ProgramCatalogItem | null 
 const findLastMentionedProgram = (
   history: ConversationMessage[],
 ): ProgramCatalogItem | null => {
-  // Search backwards through history to find any program mention
   for (let i = history.length - 1; i >= 0; i--) {
     const message = history[i];
 
     if (message.programs?.length) {
-      return getCatalogProgramByName(message.programs[0].name) || message.programs[0];
+      return getCatalogProgramByName(message.programs[0].name) || (message.programs[0] as unknown as ProgramCatalogItem);
     }
 
     const mentions = findProgramMentions(message.content);
@@ -411,11 +428,10 @@ const findLastMentionedProgram = (
 const resolveProgramFromConversation = (
   message: string,
   history: ConversationMessage[],
-): {program: ProgramCatalogItem | null; ambiguous: boolean} => {
-  // 1. Check if current message directly mentions a program
+): { program: ProgramCatalogItem | null; ambiguous: boolean } => {
   const directMentions = findProgramMentions(message);
   if (directMentions.length === 1) {
-    return {program: directMentions[0], ambiguous: false};
+    return { program: directMentions[0], ambiguous: false };
   }
 
   if (directMentions.length > 1) {
@@ -423,27 +439,25 @@ const resolveProgramFromConversation = (
     const recentMatch = directMentions.find(program => recentProgramNames.has(normalize(program.name)));
 
     if (recentMatch) {
-      return {program: recentMatch, ambiguous: false};
+      return { program: recentMatch, ambiguous: false };
     }
 
-    return {program: null, ambiguous: true};
+    return { program: null, ambiguous: true };
   }
 
-  // 2. Resolve from the current message keywords if possible
   const keywordMatch = resolveProgramFromKeywords(message);
   if (keywordMatch) {
-    return {program: keywordMatch, ambiguous: false};
+    return { program: keywordMatch, ambiguous: false };
   }
 
-  // 3. If it's a follow-up question, reuse the last recommended program from history
   if (isFollowUpProgramQuestion(message) && !hasFreshQualificationSignal(message)) {
     const lastRecommended = getLastRecommendedProgram(history) || findLastMentionedProgram(history);
     if (lastRecommended) {
-      return {program: lastRecommended, ambiguous: false};
+      return { program: lastRecommended, ambiguous: false };
     }
   }
 
-  return {program: null, ambiguous: false};
+  return { program: null, ambiguous: false };
 };
 
 const buildProgramRecommendationReply = (programs: ProgramCatalogItem[], language: 'en' | 'hi') => {
@@ -534,7 +548,7 @@ const buildThoughtfulProgramReply = (
   message: string,
   history: ConversationMessage[],
   language: 'en' | 'hi',
-  knowledgeHits: KnowledgeHit[],
+  knowledgeHits: any[],
 ) => {
   const intent = inferQuestionIntent(message);
   const userContext = `${history.filter(item => item.role === 'user').map(item => item.content).join(' ')} ${message}`;
@@ -614,44 +628,6 @@ const buildMasterPathReply = (language: 'en' | 'hi') => {
   return englishReply;
 };
 
-const parseEligibilityJson = (rawResult: string) => {
-  const cleaned = rawResult.replace(/```json\s*/gi, '').replace(/```\s*/g, '').trim();
-
-  try {
-    return JSON.parse(cleaned);
-  } catch {
-    const firstBrace = cleaned.indexOf('{');
-    const lastBrace = cleaned.lastIndexOf('}');
-    if (firstBrace >= 0 && lastBrace > firstBrace) {
-      return JSON.parse(cleaned.slice(firstBrace, lastBrace + 1));
-    }
-    throw new Error('Invalid eligibility JSON');
-  }
-};
-
-const parseScoreValue = (input: string): number | undefined => {
-  const normalized = normalize(input);
-  const percentMatch = normalized.match(/(\d{1,3}(?:\.\d{1,2})?)\s*%/);
-  if (percentMatch?.[1]) {
-    return Number(percentMatch[1]);
-  }
-
-  const gpaMatch = normalized.match(/(\d{1,2}(?:\.\d{1,2})?)\s*(?:\/\s*10|gpa)/);
-  if (gpaMatch?.[1]) {
-    const gpa = Number(gpaMatch[1]);
-    if (Number.isFinite(gpa)) {
-      return Math.min(100, Math.max(0, gpa * 10));
-    }
-  }
-
-  const rawNumber = normalized.match(/\b(\d{1,3}(?:\.\d{1,2})?)\b/);
-  if (rawNumber?.[1]) {
-    return Number(rawNumber[1]);
-  }
-
-  return undefined;
-};
-
 const isDuplicateReply = (reply: string, history: ConversationMessage[]): boolean => {
   const assistantMessages = history.filter(m => m.role === 'assistant');
   if (assistantMessages.length === 0) return false;
@@ -659,478 +635,314 @@ const isDuplicateReply = (reply: string, history: ConversationMessage[]): boolea
   const clean = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, '');
   const cleanReply = clean(reply);
   
-  // Check if any of the last 2 assistant replies are identical to this reply
   const last2 = assistantMessages.slice(-2);
   return last2.some(m => clean(m.content) === cleanReply);
 };
 
-const sendResponse = async (
-  res: Response,
-  cleanMessage: string,
-  safeHistory: ConversationMessage[],
-  responseLanguage: 'en' | 'hi',
-  payload: {
-    reply: string;
-    responseLanguage: 'en' | 'hi';
-    responseType?: string;
-    programs?: ProgramCatalogItem[];
-    rules?: string[];
-    knowledge?: string[];
-    timestamp?: number;
-  }
-) => {
-  let finalReply = payload.reply;
-  if (isDuplicateReply(finalReply, safeHistory)) {
-    console.log('[DUPLICATE DETECTED] Breaking cycle...');
-    const breakPrompt = `The user's query is: "${cleanMessage}". 
-I have already given the response: "${finalReply}" recently. 
-Please provide a different, helpful response in ${responseLanguage === 'hi' ? 'Hindi' : 'English'}. Answer their actual question directly, or ask a clarifying question. Do NOT repeat the list of courses or the previous answer.`;
-    
-    finalReply = await GeminiService.chat(
-      breakPrompt,
-      safeHistory,
-      {temperature: 0.7, language: responseLanguage}
-    );
-  }
-  res.json({
-    ...payload,
-    reply: finalReply,
-    timestamp: payload.timestamp || Date.now(),
-  });
-};
+// ─── Main Client-Side processChat entrypoint ─────────────────────────────────
+export const processChat = async (
+  message: string,
+  history: ConversationMessage[],
+  image?: string | null,
+): Promise<ChatEngineResponse> => {
+  const cleanMessage = message.trim();
+  const safeHistory = Array.isArray(history) ? history : [];
+  const responseLanguage = detectResponseLanguage(cleanMessage, safeHistory);
+  const knowledgeHits = VectorKnowledge.search(cleanMessage);
+  const userImage = typeof image === 'string' ? image : undefined;
 
-const buildLocalEligibilityResult = (qualification: string, percentage: string, englishScore: string, workExperience: string) => {
-  const qualificationText = normalize(qualification);
-  const scoreValue = parseScoreValue(percentage);
-  const englishScoreValue = parseScoreValue(englishScore);
-  const hasWorkExperience = workExperience.trim().length > 0 && !includesAny(normalize(workExperience), ['none', 'no']);
-
-  const scoredPrograms = PROGRAM_CATALOG.map(program => {
-    let score = 0;
-
-    if (qualificationText.includes('computer') || qualificationText.includes('science') || qualificationText.includes('it')) {
-      if (program.fields.some(field => includesAny(normalize(field), ['computer', 'it', 'technology', 'software']))) {
-        score += 3;
-      }
-    }
-
-    if (scoreValue !== undefined && program.minGpa !== undefined) {
-      if (scoreValue >= program.minGpa * 10) {
-        score += 3;
-      } else {
-        score -= 3;
-      }
-    }
-
-    if (qualificationText && program.minQualificationKeywords.some(keyword => qualificationText.includes(keyword))) {
-      score += 2;
-    }
-
-    if (program.level === inferLevel(qualification)) {
-      score += 2;
-    }
-
-    if (englishScoreValue !== undefined && englishScoreValue >= 65) {
-      score += 1;
-    }
-
-    if (hasWorkExperience && program.level === 'PG') {
-      score += 1;
-    }
-
-    return {program, score};
-  });
-
-  const eligible = scoredPrograms
-    .filter(item => item.score >= 2)
-    .sort((a, b) => b.score - a.score)
-    .slice(0, 3)
-    .map(item => ({
-      name: item.program.name,
-      university: item.program.university,
-      country: item.program.country,
-      minimumRequirement: item.program.eligibility,
-      status: 'eligible' as const,
-      reason:
-        scoreValue !== undefined && item.program.minGpa !== undefined && scoreValue >= item.program.minGpa * 10
-          ? 'Your score meets the catalog minimum.'
-          : 'Your profile matches the catalog entry.',
-    }));
-
-  const notEligible = scoredPrograms
-    .filter(item => item.score < 2)
-    .sort((a, b) => a.score - b.score)
-    .slice(0, 2)
-    .map(item => ({
-      name: item.program.name,
-      university: item.program.university,
-      country: item.program.country,
-      minimumRequirement: item.program.eligibility,
-      status: 'not_eligible' as const,
-      reason: 'Your current profile does not match the catalog requirements as well as the eligible options.',
-    }));
-
-  return {
-    eligibleCourses: eligible,
-    notEligibleCourses: notEligible,
-    summary:
-      eligible.length > 0
-        ? 'These programs best match your current profile.'
-        : 'No strong match found. Please refine your qualification or score.',
-    recommendations: eligible.map(item => item.name),
-  };
-};
-
-export const healthController = (_req: Request, res: Response) => {
-  res.json({status: 'ok', timestamp: Date.now()});
-};
-
-export const chatController = async (req: Request, res: Response) => {
-  try {
-    const {message, history, image} = req.body;
-
-    if (!message || typeof message !== 'string' || !message.trim()) {
-      res.status(400).json({reply: 'Message is required', timestamp: Date.now()});
-      return;
-    }
-
-    const safeHistory = Array.isArray(history) ? history : [];
-    const cleanMessage = message.trim();
-    const responseLanguage = detectResponseLanguage(cleanMessage, safeHistory);
-    const knowledgeHits = VectorKnowledgeService.search(cleanMessage);
-
-    // ── Save program intent check ──────────────────────────────────────────
-    if (isSaveIntent(cleanMessage)) {
-      const programToSave = findProgramMentions(cleanMessage)[0] || findProgramMentions(safeHistory.map(m => m.content).join(' '))[0];
-      if (programToSave) {
-        await sendResponse(res, cleanMessage, safeHistory, responseLanguage, {
-          reply:
-            responseLanguage === 'hi'
-              ? `${programToSave.name} आपके saved programs में जोड़ दिया गया है.`
-              : `${programToSave.name} has been added to your saved programs.`,
-          responseLanguage,
-          responseType: 'save_confirmation',
-          programs: [programToSave],
-        });
-        return;
-      }
-    }
-
-    // ── "List all" shortcut ────────────────────────────────────────────────
-    const listAllRegex = /\b(all|list|show all|give me all|show|display|tell me)\b.*\b(course|program|option|programs|courses)s?\b/i;
-    const isListRequest = listAllRegex.test(cleanMessage) ||
-                          includesAny(normalize(cleanMessage), ['course list', 'courses list', 'program list', 'list of programs', 'list of courses', 'all programs', 'all courses', 'सभी कोर्स', 'सभी प्रोग्राम']);
-    if (isListRequest) {
-      const programs = ProgramService.getAllPrograms();
-      res.json({
-        reply:
-          responseLanguage === 'hi'
-            ? 'मेरे कैटलॉग में उपलब्ध सभी कोर्स यहाँ हैं:'
-            : 'Here are all the courses I have in my catalog:',
-        programs,
-        responseLanguage,
-        timestamp: Date.now(),
-      });
-      return;
-    }
-    const userImage = typeof image === 'string' ? image : undefined;
-
-    if (isGreetingMessage(cleanMessage)) {
-      const reply = await GeminiService.chat(cleanMessage, safeHistory, {userImage, language: responseLanguage});
-      await sendResponse(res, cleanMessage, safeHistory, responseLanguage, {reply, responseLanguage});
-      return;
-    }
-
-    // ── Direct program follow-up flow ─────────────────────────────────────
-    const programContext = resolveProgramFromConversation(cleanMessage, safeHistory);
-    if (programContext.program) {
-      const reply = buildThoughtfulProgramReply(
-        programContext.program,
-        cleanMessage,
-        safeHistory,
-        responseLanguage,
-        knowledgeHits,
-      );
-      await sendResponse(res, cleanMessage, safeHistory, responseLanguage, {
+  // 1. Save program intent check
+  if (isSaveIntent(cleanMessage)) {
+    const programToSave = findProgramMentions(cleanMessage)[0] || findProgramMentions(safeHistory.map(m => m.content).join(' '))[0];
+    if (programToSave) {
+      const reply = responseLanguage === 'hi'
+        ? `${programToSave.name} आपके saved programs में जोड़ दिया गया है.`
+        : `${programToSave.name} has been added to your saved programs.`;
+      
+      return {
         reply,
         responseLanguage,
-        responseType: 'detail',
-        programs: [programContext.program],
-        knowledge: knowledgeHits.map(hit => hit.id),
-      });
-      return;
+        responseType: 'save_confirmation',
+        programs: [programToSave],
+        timestamp: Date.now(),
+      };
+    }
+  }
+
+  // 2. "List all" shortcut
+  const listAllRegex = /\b(all|list|show all|give me all|show|display|tell me)\b.*\b(course|program|option|programs|courses)s?\b/i;
+  const isListRequest = listAllRegex.test(cleanMessage) ||
+                        includesAny(normalize(cleanMessage), ['course list', 'courses list', 'program list', 'list of programs', 'list of courses', 'all programs', 'all courses', 'सभी कोर्स', 'सभी प्रोग्राम']);
+  if (isListRequest) {
+    const programs = ProgramService.getAllPrograms();
+    return {
+      reply: responseLanguage === 'hi'
+        ? 'मेरे कैटलॉग में उपलब्ध सभी कोर्स यहाँ हैं:'
+        : 'Here are all the courses I have in my catalog:',
+      programs,
+      responseLanguage,
+      responseType: 'recommendation',
+      timestamp: Date.now(),
+    };
+  }
+
+  // 3. Greeting flow
+  if (isGreetingMessage(cleanMessage)) {
+    const reply = await directGeminiChat(cleanMessage, safeHistory, { userImage, language: responseLanguage });
+    return {
+      reply,
+      responseLanguage,
+      responseType: 'general',
+      timestamp: Date.now(),
+    };
+  }
+
+  // 4. Direct program follow-up flow
+  const programContext = resolveProgramFromConversation(cleanMessage, safeHistory);
+  if (programContext.program) {
+    const reply = buildThoughtfulProgramReply(
+      programContext.program,
+      cleanMessage,
+      safeHistory,
+      responseLanguage,
+      knowledgeHits,
+    );
+    
+    // Check for duplicate reply to break cycle
+    let finalReply = reply;
+    if (isDuplicateReply(finalReply, safeHistory)) {
+      const breakPrompt = `The user's query is: "${cleanMessage}". 
+I have already given the response: "${finalReply}" recently. 
+Please provide a different, helpful response in ${responseLanguage === 'hi' ? 'Hindi' : 'English'}. Answer their actual question directly, or ask a clarifying question. Do NOT repeat the list of courses or the previous answer.`;
+      
+      finalReply = await directGeminiChat(breakPrompt, safeHistory, { temperature: 0.7, language: responseLanguage });
     }
 
-    if (programContext.ambiguous) {
-      const level = inferLevel(`${cleanMessage} ${safeHistory.map(m => m.content).join(' ')}`);
-      if (level !== 'Any') {
-        const searchInput = `${cleanMessage} ${safeHistory.map(item => item.content).join(' ')}`;
-        const programs = ProgramService.search({
-          qualification: searchInput,
-          gpa: '',
-          interests: searchInput,
-          preferredCountry: '',
-          targetLevel: level,
-        });
+    return {
+      reply: finalReply,
+      responseLanguage,
+      responseType: 'detail',
+      programs: [programContext.program],
+      knowledge: knowledgeHits.map(hit => hit.id),
+      timestamp: Date.now(),
+    };
+  }
 
-        if (programs.length > 0) {
-          const recommendation = buildProgramRecommendationReply(programs, responseLanguage);
-          await sendResponse(res, cleanMessage, safeHistory, responseLanguage, {
-            reply: recommendation.reply,
-            responseLanguage,
-            responseType: 'recommendation',
-            programs: recommendation.programs,
-            knowledge: knowledgeHits.map(hit => hit.id),
-          });
-          return;
+  // Ambiguous program mention but level hint exists
+  if (programContext.ambiguous) {
+    const level = inferLevel(`${cleanMessage} ${safeHistory.map(m => m.content).join(' ')}`);
+    if (level !== 'Any') {
+      const searchInput = `${cleanMessage} ${safeHistory.map(item => item.content).join(' ')}`;
+      const programs = ProgramService.search({
+        qualification: searchInput,
+        gpa: '',
+        interests: searchInput,
+        preferredCountry: '',
+        targetLevel: level,
+      });
+
+      if (programs.length > 0) {
+        const recommendation = buildProgramRecommendationReply(programs, responseLanguage);
+        
+        let finalReply = recommendation.reply;
+        if (isDuplicateReply(finalReply, safeHistory)) {
+          const breakPrompt = `The user's query is: "${cleanMessage}". 
+I have already given the response: "${finalReply}" recently. 
+Please provide a different, helpful response in ${responseLanguage === 'hi' ? 'Hindi' : 'English'}. Answer their actual question directly, or ask a clarifying question. Do NOT repeat the list of courses or the previous answer.`;
+          
+          finalReply = await directGeminiChat(breakPrompt, safeHistory, { temperature: 0.7, language: responseLanguage });
         }
 
-        await sendResponse(res, cleanMessage, safeHistory, responseLanguage, {
-          reply:
-            responseLanguage === 'hi'
-              ? 'पिछली सूची में आप किस कोर्स की बात कर रहे हैं?'
-              : 'Which course do you mean from the previous list?',
+        return {
+          reply: finalReply,
           responseLanguage,
-        });
-        return;
+          responseType: 'recommendation',
+          programs: recommendation.programs,
+          knowledge: knowledgeHits.map(hit => hit.id),
+          timestamp: Date.now(),
+        };
+      }
+
+      return {
+        reply: responseLanguage === 'hi'
+          ? 'पिछली सूची में आप किस कोर्स की बात कर रहे हैं?'
+          : 'Which course do you mean from the previous list?',
+        responseLanguage,
+        timestamp: Date.now(),
+      };
+    }
+  }
+
+  // 5. General intent analysis via Gemini API
+  let analysis: AssistantAnalysis | null = null;
+  try {
+    analysis = await analyzeConversation(cleanMessage, safeHistory);
+  } catch (err) {
+    console.warn('[ChatEngine] analyzeConversation error:', err);
+  }
+
+  // 6. Fill gaps using Local Extraction
+  const localData = extractProfileLocally(cleanMessage, safeHistory);
+  const combinedText = normalize(cleanMessage);
+  const combinedUserText = normalize(cleanMessage);
+  const currentRequestedLevel = inferRequestedProgramLevel(cleanMessage);
+  const previousRequestedLevel = inferRequestedProgramLevel(safeHistory.map(item => item.content).join(' '));
+  const requestedLevel = currentRequestedLevel || previousRequestedLevel || (localData.level || undefined);
+  const relevantRules = findRelevantAppRules(`${combinedUserText} ${cleanMessage}`);
+  const hasCourseContext = includesAny(combinedText, [
+    'course', 'courses', 'program', 'programs', 'degree', 'study', 'studies',
+    'admission', 'admissions', 'university', 'college', 'after 12th', '12th pass',
+    'class 12', 'secondary', 'intermediate', 'high school', 'master', 'diploma', 'bachelor'
+  ]);
+
+  if (!analysis) {
+    analysis = {
+      topic: 'general',
+      confidence: 0,
+      needsMoreInfo: false,
+      profile: {},
+    };
+  }
+
+  if (!analysis.profile) {
+    analysis.profile = {};
+  }
+
+  if (localData.level && !analysis.profile.level) {
+    analysis.profile.level = localData.level;
+  }
+  if (localData.field && !analysis.profile.field) {
+    analysis.profile.field = localData.field;
+  }
+  if (localData.score && !analysis.profile.score) {
+    analysis.profile.score = localData.score;
+  }
+  if (requestedLevel) {
+    analysis.profile.level = requestedLevel;
+  }
+
+  if (hasCourseContext || analysis.profile.level || analysis.profile.field) {
+    analysis.topic = 'course';
+    analysis.confidence = Math.max(analysis.confidence || 0, 0.8);
+  }
+
+  // Smart post-processing
+  if (analysis.topic === 'course' && analysis.profile) {
+    if (!analysis.profile.level || analysis.profile.level === 'Any') {
+      const inferredLevel = inferLevel(`${cleanMessage} ${safeHistory.map(m => m.content).join(' ')}`);
+      if (inferredLevel !== 'Any') {
+        analysis.profile.level = inferredLevel;
       }
     }
+    const hasLevel = analysis.profile.level && analysis.profile.level !== 'Any';
+    const hasField = analysis.profile.field && analysis.profile.field.trim().length > 0;
+    analysis.needsMoreInfo = !(hasLevel && hasField);
+  }
 
-    // ── Analyze intent ─────────────────────────────────────────────────────
-    let analysis = await GeminiService.analyzeConversation(cleanMessage, safeHistory);
-    console.log('[ANALYSIS BEFORE PROCESSING]', JSON.stringify(analysis, null, 2));
-    
-    // ── LOCAL EXTRACTION — Fill gaps in Gemini analysis ────────────────────
-    const localData = extractProfileLocally(cleanMessage, safeHistory);
-    const combinedText = normalize(cleanMessage);
-    const combinedUserText = normalize(cleanMessage);
-    const currentRequestedLevel = inferRequestedProgramLevel(cleanMessage);
-    const previousRequestedLevel = inferRequestedProgramLevel(safeHistory.map(item => item.content).join(' '));
-    const requestedLevel = currentRequestedLevel || previousRequestedLevel || (localData.level || undefined);
-    const relevantRules = findRelevantAppRules(`${combinedUserText} ${cleanMessage}`);
-    const hasCourseContext = includesAny(combinedText, [
-      'course',
-      'courses',
-      'program',
-      'programs',
-      'degree',
-      'study',
-      'studies',
-      'admission',
-      'admissions',
-      'university',
-      'college',
-      'after 12th',
-      '12th pass',
-      'class 12',
-      'secondary',
-      'intermediate',
-      'high school',
-      'master',
-      'diploma',
-      'bachelor',
-    ]);
-
-    if (!analysis) {
-      analysis = {
-        topic: 'general',
-        confidence: 0,
-        needsMoreInfo: false,
-        profile: {},
+  // Course Recommendation Flow
+  if (analysis.topic === 'course' && analysis.profile) {
+    if (requestedLevel === 'PG' && hasSchoolQualification(combinedUserText) && !hasBachelorQualification(combinedUserText)) {
+      return {
+        reply: buildMasterPathReply(responseLanguage),
+        responseLanguage,
+        responseType: 'general',
+        rules: relevantRules.map(rule => rule.id),
+        knowledge: knowledgeHits.map(hit => hit.id),
+        timestamp: Date.now(),
       };
     }
 
-    if (!analysis.profile) {
-      analysis.profile = {};
-    }
-
-    if (localData.level && !analysis.profile.level) {
-      analysis.profile.level = localData.level;
-    }
-    if (localData.field && !analysis.profile.field) {
-      analysis.profile.field = localData.field;
-    }
-    if (localData.score && !analysis.profile.score) {
-      analysis.profile.score = localData.score;
-    }
-    if (requestedLevel) {
-      analysis.profile.level = requestedLevel;
-    }
-
-    if (hasCourseContext || analysis.profile.level || analysis.profile.field) {
-      analysis.topic = 'course';
-      analysis.confidence = Math.max(analysis.confidence || 0, 0.8);
-    }
-    console.log('[ANALYSIS WITH LOCAL EXTRACTION]', JSON.stringify(analysis, null, 2));
-    
-    // ── Smart post-processing of analysis ──────────────────────────────────
-    if (analysis?.topic === 'course' && analysis?.profile) {
-      // Try to infer missing level from current message if not captured
-      if (!analysis.profile.level || analysis.profile.level === 'Any') {
-        const inferredLevel = inferLevel(`${cleanMessage} ${safeHistory.map(m => m.content).join(' ')}`);
-        if (inferredLevel !== 'Any') {
-          analysis.profile.level = inferredLevel;
-        }
-      }
+    // Still missing info — ask one follow-up question
+    if (analysis.needsMoreInfo) {
+      const missingFieldsText = [];
+      if (!analysis.profile.level) missingFieldsText.push('education level (12th, B.Tech, etc.)');
+      if (!analysis.profile.field) missingFieldsText.push('field of interest (CS, engineering, etc.)');
+      if (!analysis.profile.score) missingFieldsText.push('academic score/GPA');
+      if (!analysis.profile.country) missingFieldsText.push('preferred country');
       
-      // Check if we have enough info now (level + field is minimum)
-      const hasLevel = analysis.profile.level && analysis.profile.level !== 'Any';
-      const hasField = analysis.profile.field && analysis.profile.field.trim().length > 0;
+      const missingInfo = missingFieldsText.length > 0 
+        ? `Ask ONE specific question to collect this: ${missingFieldsText.join(', ')}. Do NOT ask the same question twice.`
+        : 'Ask ONE clarifying question to better understand their profile.';
       
-      // Only mark needsMoreInfo if we're genuinely missing critical info
-      analysis.needsMoreInfo = !(hasLevel && hasField);
-    }
-    
-    console.log('[ANALYSIS AFTER PROCESSING]', JSON.stringify(analysis, null, 2));
-
-    // ── Course recommendation flow ─────────────────────────────────────────
-    if (analysis?.topic === 'course' && analysis?.profile) {
-      if (requestedLevel === 'PG' && hasSchoolQualification(combinedUserText) && !hasBachelorQualification(combinedUserText)) {
-        await sendResponse(res, cleanMessage, safeHistory, responseLanguage, {
-          reply: buildMasterPathReply(responseLanguage),
-          responseLanguage,
-          responseType: 'general',
-          rules: relevantRules.map(rule => rule.id),
-          knowledge: knowledgeHits.map(hit => hit.id),
-        });
-        return;
-      }
-
-      // Still missing info — ask one follow-up question
-      if (analysis.needsMoreInfo) {
-        const missingFieldsText = [];
-        if (!analysis.profile.level) missingFieldsText.push('education level (12th, B.Tech, etc.)');
-        if (!analysis.profile.field) missingFieldsText.push('field of interest (CS, engineering, etc.)');
-        if (!analysis.profile.score) missingFieldsText.push('academic score/GPA');
-        if (!analysis.profile.country) missingFieldsText.push('preferred country');
-        
-        const missingInfo = missingFieldsText.length > 0 
-          ? `Ask ONE specific question to collect this: ${missingFieldsText.join(', ')}. Do NOT ask the same question twice.`
-          : 'Ask ONE clarifying question to better understand their profile.';
-        
-        const followUp = await GeminiService.chat(
-          missingInfo,
-          safeHistory,
-          {temperature: 0.3, language: responseLanguage},
-        );
-        await sendResponse(res, cleanMessage, safeHistory, responseLanguage, {reply: followUp, responseLanguage});
-        return;
-      }
-
-      // Have enough info — search catalog and explain matches
-      const questionIntent = inferQuestionIntent(cleanMessage);
-      const allPrograms = ProgramService.search({
-        qualification: `${analysis.profile.qualification || ''} ${combinedUserText}`,
-        gpa:           analysis.profile.score || '',
-        interests:     analysis.profile.field || '',
-        preferredCountry: analysis.profile.country || '',
-        targetLevel: requestedLevel || 'Any',
-      });
-      const recentNames = getRecentlyRecommendedProgramNames(safeHistory);
-      const programs = questionIntent === 'alternative'
-        ? allPrograms.filter(program => !recentNames.has(normalize(program.name)))
-        : allPrograms;
-
-      const reply = questionIntent === 'best_fit'
-        ? buildBestFitReply(programs.length ? programs : allPrograms, combinedUserText, responseLanguage)
-        : buildProgramRecommendationText(
-            programs.length ? programs : allPrograms,
-            responseLanguage,
-            questionIntent === 'alternative'
-              ? responseLanguage === 'hi'
-                ? 'ये कुछ दूसरे अच्छे options हैं:'
-                : 'Here are other good options from my catalog:'
-              : undefined,
-          );
-
-      await sendResponse(res, cleanMessage, safeHistory, responseLanguage, {
-        reply,
+      const followUp = await directGeminiChat(missingInfo, safeHistory, { temperature: 0.3, language: responseLanguage });
+      return {
+        reply: followUp,
         responseLanguage,
-        responseType: 'recommendation',
-        programs: programs.length ? programs : allPrograms,
-        rules: relevantRules.map(rule => rule.id),
-        knowledge: knowledgeHits.map(hit => hit.id),
-      });
-      return;
+        responseType: 'general',
+        timestamp: Date.now(),
+      };
     }
 
-    // ── General chat flow ──────────────────────────────────────────────────
-    const reply = await GeminiService.chat(cleanMessage, safeHistory, {
+    // Have enough info — search catalog and explain matches
+    const questionIntent = inferQuestionIntent(cleanMessage);
+    const allPrograms = ProgramService.search({
+      qualification: `${analysis.profile.qualification || ''} ${combinedUserText}`,
+      gpa:           analysis.profile.score || '',
+      interests:     analysis.profile.field || '',
+      preferredCountry: analysis.profile.country || '',
+      targetLevel: requestedLevel || 'Any',
+    });
+    const recentNames = getRecentlyRecommendedProgramNames(safeHistory);
+    const programs = questionIntent === 'alternative'
+      ? allPrograms.filter(program => !recentNames.has(normalize(program.name)))
+      : allPrograms;
+
+    const reply = questionIntent === 'best_fit'
+      ? buildBestFitReply(programs.length ? programs : allPrograms, combinedUserText, responseLanguage)
+      : buildProgramRecommendationText(
+          programs.length ? programs : allPrograms,
+          responseLanguage,
+          questionIntent === 'alternative'
+            ? responseLanguage === 'hi'
+              ? 'ये कुछ दूसरे अच्छे options हैं:'
+              : 'Here are other good options from my catalog:'
+            : undefined,
+        );
+
+    let finalReply = reply;
+    if (isDuplicateReply(finalReply, safeHistory)) {
+      const breakPrompt = `The user's query is: "${cleanMessage}". 
+I have already given the response: "${finalReply}" recently. 
+Please provide a different, helpful response in ${responseLanguage === 'hi' ? 'Hindi' : 'English'}. Answer their actual question directly, or ask a clarifying question. Do NOT repeat the list of courses or the previous answer.`;
+      
+      finalReply = await directGeminiChat(breakPrompt, safeHistory, { temperature: 0.7, language: responseLanguage });
+    }
+
+    return {
+      reply: finalReply,
+      responseLanguage,
+      responseType: 'recommendation',
+      programs: programs.length ? programs : allPrograms,
+      rules: relevantRules.map(rule => rule.id),
+      knowledge: knowledgeHits.map(hit => hit.id),
+      timestamp: Date.now(),
+    };
+  }
+
+  // 7. General chat flow fallback
+  let reply = 'AI request failed. Please check your network connection.';
+  try {
+    reply = await directGeminiChat(cleanMessage, safeHistory, {
       temperature: 0.3,
       userImage,
       language: responseLanguage,
     });
 
-    await sendResponse(res, cleanMessage, safeHistory, responseLanguage, {reply, responseLanguage});
-  } catch (error: any) {
-    console.error('[ChatController] Error:', error?.message || error);
-    // Gemini is offline or unreachable
-    res.status(500).json({
-      reply: "I'm having trouble connecting to the AI. Please check your Gemini API key and network connection.",
-      timestamp: Date.now(),
-    });
-  }
-};
-
-export const programFinderController = async (req: Request, res: Response) => {
-  try {
-    const {qualification, gpa, interests, preferredCountry} = req.body;
-
-    if (!qualification || !interests) {
-      res.status(400).json({message: 'qualification and interests are required'});
-      return;
+    if (isDuplicateReply(reply, safeHistory)) {
+      const breakPrompt = `The user's query is: "${cleanMessage}". 
+I have already given the response: "${reply}" recently. 
+Please provide a different, helpful response in ${responseLanguage === 'hi' ? 'Hindi' : 'English'}. Answer their actual question directly, or ask a clarifying question. Do NOT repeat the previous answer.`;
+      
+      reply = await directGeminiChat(breakPrompt, safeHistory, { temperature: 0.7, language: responseLanguage });
     }
-
-    const programs = ProgramService.search({
-      qualification: qualification || '',
-      gpa:           gpa || '',
-      interests:     interests || '',
-      preferredCountry: preferredCountry || '',
-    });
-
-    const summary = await GeminiService.chat(
-      `Summarize in ONE sentence why these programs suit a student with: qualification=${qualification}, interests=${interests}.
-Programs: ${JSON.stringify(programs.map(p => p.name))}`,
-      [],
-      {temperature: 0.2},
-    );
-
-    res.json({programs, summary, totalFound: programs.length, timestamp: Date.now()});
-  } catch (error: any) {
-    console.error('[ProgramFinderController] Error:', error?.message || error);
-    res.status(500).json({message: 'Program search failed', timestamp: Date.now()});
+  } catch (error) {
+    console.error('[ChatEngine] Fallback Chat error:', error);
   }
-};
 
-export const eligibilityController = async (req: Request, res: Response) => {
-  try {
-    const {qualification, percentage, englishScore, workExperience} = req.body;
-
-    if (!qualification || !percentage) {
-      res.status(400).json({message: 'qualification and percentage are required'});
-      return;
-    }
-
-    const rawResult = await GeminiService.checkEligibility({
-      qualification,
-      percentage,
-      englishScore: englishScore || 'Not provided',
-      workExperience: workExperience || 'None',
-    });
-
-    const result = parseEligibilityJson(rawResult);
-
-    res.json({...result, timestamp: Date.now()});
-  } catch (error: any) {
-    console.error('[EligibilityController] Error:', error?.message || error);
-
-    const fallback = buildLocalEligibilityResult(
-      String(req.body?.qualification || ''),
-      String(req.body?.percentage || ''),
-      String(req.body?.englishScore || 'Not provided'),
-      String(req.body?.workExperience || 'None'),
-    );
-
-    res.json({...fallback, timestamp: Date.now(), source: 'local_fallback'});
-  }
+  return {
+    reply,
+    responseLanguage,
+    responseType: 'general',
+    timestamp: Date.now(),
+  };
 };

@@ -108,13 +108,8 @@ const extractProfileLocally = (message, history) => {
 };
 const containsDevanagari = (message) => /[\u0900-\u097F]/.test(message);
 const detectResponseLanguage = (message, history) => {
-    // Check current message for Devanagari script first (most reliable indicator)
+    // Decide from the current message only so one Hindi turn does not lock the whole thread.
     if (containsDevanagari(message))
-        return 'hi';
-    // Check recent conversation history for language pattern
-    const recentHistory = history.slice(-6); // Last 3 exchanges
-    const hasRecentHindi = recentHistory.some(item => containsDevanagari(item.content));
-    if (hasRecentHindi)
         return 'hi';
     // Check for common Hindi question words
     const normalized = normalize(message);
@@ -141,11 +136,102 @@ const isGreetingMessage = (text) => {
         'tell me about yourself',
     ]);
 };
+const TRANSLITERATION_MAP = {
+    'बैचलर': 'bachelor',
+    'बेचलर': 'bachelor',
+    'बेटर': 'bachelor',
+    'ऑफ़': 'of',
+    'ऑफ': 'of',
+    'कंप्यूटर': 'computer',
+    'कम्प्यूटर': 'computer',
+    'साइंस': 'science',
+    'सीएस': 'computer science',
+    'डेटा': 'data',
+    'डाटा': 'data',
+    'इंजीनियरिंग': 'engineering',
+    'इन्जीनियरिंग': 'engineering',
+    'इनफार्मेशन': 'information',
+    'इन्फॉरमेशन': 'information',
+    'टेक्नोलॉजी': 'technology',
+    'तकनीकी': 'technology',
+    'आईटी': 'information technology',
+    'बिजनेस': 'business',
+    'बिज़नेस': 'business',
+    'एडमिनिस्ट्रेशन': 'administration',
+    'मास्टर': 'master',
+    'मास्टर्स': 'master',
+    'एमबीए': 'mba',
+    'डिप्लोमा': 'diploma',
+    'पोस्टग्रेजुएट': 'postgraduate',
+    'साइबर': 'cyber',
+    'सिक्योरिटी': 'security',
+    'सुरक्षा': 'security',
+    'पब्लिक': 'public',
+    'हेल्थ': 'health',
+    'स्वास्थ्य': 'health',
+    'एजुकेशन': 'education',
+    'शिक्षा': 'education',
+    'सेव': 'save',
+    'सावे': 'save',
+};
+const transliterateText = (text) => {
+    let normalized = text.toLowerCase();
+    const phrases = [
+        { key: 'better of', val: 'bachelor of' },
+        { key: 'बेटर ऑफ़', val: 'bachelor of' },
+        { key: 'बेटर ऑफ', val: 'bachelor of' },
+        { key: 'बैचलर ऑफ़', val: 'bachelor of' },
+        { key: 'बैचलर ऑफ', val: 'bachelor of' },
+        { key: 'मास्टर ऑफ़', val: 'master of' },
+        { key: 'मास्टर ऑफ', val: 'master of' },
+        { key: 'डेटा साइंस', val: 'data science' },
+        { key: 'डाटा साइंस', val: 'data science' },
+        { key: 'कंप्यूटर साइंस', val: 'computer science' },
+        { key: 'कम्प्यूटर साइंस', val: 'computer science' },
+        { key: 'साइबर सिक्योरिटी', val: 'cyber security' },
+        { key: 'पब्लिक हेल्थ', val: 'public health' },
+        { key: 'बिजनेस एडमिनिस्ट्रेशन', val: 'business administration' }
+    ];
+    for (const phrase of phrases) {
+        normalized = normalized.replace(new RegExp(phrase.key, 'g'), phrase.val);
+    }
+    const words = normalized.split(/\s+/);
+    const mappedWords = words.map(w => TRANSLITERATION_MAP[w] || w);
+    return mappedWords.join(' ');
+};
+const isSaveIntent = (text) => {
+    const transliterated = transliterateText(text);
+    const normalized = normalize(transliterated);
+    const hasPhraseIntent = [
+        'save this program',
+        'save program',
+        'save it',
+        'add to saved',
+        'add this to saved',
+        'bookmark',
+        'favorite',
+        'favourite',
+        'store this program',
+        'सेव',
+        'save करो',
+        'save kar do',
+        'save kar',
+    ].some(keyword => {
+        const kw = normalize(keyword);
+        return normalized.includes(kw) || normalize(text).includes(kw);
+    });
+    if (hasPhraseIntent)
+        return true;
+    const words = normalized.split(/\s+/);
+    const origWords = normalize(text).split(/\s+/);
+    return ['save', 'सेव', 'बचाओ', 'रखो'].some(kw => words.includes(kw) || origWords.includes(kw));
+};
 const PROGRAM_NAME_LIST = [...programCatalog_1.PROGRAM_CATALOG]
     .map(program => program.name)
     .sort((a, b) => b.length - a.length);
 const findProgramMentions = (text) => {
-    const normalized = normalize(text);
+    const transliterated = transliterateText(text);
+    const normalized = normalize(transliterated);
     const matches = [];
     // Exact matches first
     programCatalog_1.PROGRAM_CATALOG.forEach(program => {
@@ -452,6 +538,31 @@ const parseScoreValue = (input) => {
     }
     return undefined;
 };
+const isDuplicateReply = (reply, history) => {
+    const assistantMessages = history.filter(m => m.role === 'assistant');
+    if (assistantMessages.length === 0)
+        return false;
+    const clean = (s) => s.toLowerCase().replace(/[^a-z0-9]/g, '');
+    const cleanReply = clean(reply);
+    // Check if any of the last 2 assistant replies are identical to this reply
+    const last2 = assistantMessages.slice(-2);
+    return last2.some(m => clean(m.content) === cleanReply);
+};
+const sendResponse = async (res, cleanMessage, safeHistory, responseLanguage, payload) => {
+    let finalReply = payload.reply;
+    if (isDuplicateReply(finalReply, safeHistory)) {
+        console.log('[DUPLICATE DETECTED] Breaking cycle...');
+        const breakPrompt = `The user's query is: "${cleanMessage}". 
+I have already given the response: "${finalReply}" recently. 
+Please provide a different, helpful response in ${responseLanguage === 'hi' ? 'Hindi' : 'English'}. Answer their actual question directly, or ask a clarifying question. Do NOT repeat the list of courses or the previous answer.`;
+        finalReply = await GeminiService_1.default.chat(breakPrompt, safeHistory, { temperature: 0.7, language: responseLanguage });
+    }
+    res.json({
+        ...payload,
+        reply: finalReply,
+        timestamp: payload.timestamp || Date.now(),
+    });
+};
 const buildLocalEligibilityResult = (qualification, percentage, englishScore, workExperience) => {
     const qualificationText = normalize(qualification);
     const scoreValue = parseScoreValue(percentage);
@@ -537,6 +648,21 @@ const chatController = async (req, res) => {
         const responseLanguage = detectResponseLanguage(cleanMessage, safeHistory);
         const historyText = safeHistory.map(item => item.content).join(' ');
         const knowledgeHits = VectorKnowledgeService_1.default.search(cleanMessage);
+        // ── Save program intent check ──────────────────────────────────────────
+        if (isSaveIntent(cleanMessage)) {
+            const programToSave = findProgramMentions(cleanMessage)[0] || findProgramMentions(safeHistory.map(m => m.content).join(' '))[0];
+            if (programToSave) {
+                await sendResponse(res, cleanMessage, safeHistory, responseLanguage, {
+                    reply: responseLanguage === 'hi'
+                        ? `${programToSave.name} आपके saved programs में जोड़ दिया गया है.`
+                        : `${programToSave.name} has been added to your saved programs.`,
+                    responseLanguage,
+                    responseType: 'save_confirmation',
+                    programs: [programToSave],
+                });
+                return;
+            }
+        }
         // ── "List all" shortcut ────────────────────────────────────────────────
         const listAllRegex = /\b(all|list|show all|give me all|show|display|tell me)\b.*\b(course|program|option|programs|courses)s?\b/i;
         const isListRequest = listAllRegex.test(cleanMessage) ||
@@ -556,51 +682,52 @@ const chatController = async (req, res) => {
         const userImage = typeof image === 'string' ? image : undefined;
         if (isGreetingMessage(cleanMessage)) {
             const reply = await GeminiService_1.default.chat(cleanMessage, safeHistory, { userImage, language: responseLanguage });
-            res.json({ reply, responseLanguage, timestamp: Date.now() });
+            await sendResponse(res, cleanMessage, safeHistory, responseLanguage, { reply, responseLanguage });
             return;
         }
         // ── Direct program follow-up flow ─────────────────────────────────────
         const programContext = resolveProgramFromConversation(cleanMessage, safeHistory);
         if (programContext.program) {
             const reply = buildThoughtfulProgramReply(programContext.program, cleanMessage, safeHistory, responseLanguage, knowledgeHits);
-            res.json({
+            await sendResponse(res, cleanMessage, safeHistory, responseLanguage, {
                 reply,
                 responseLanguage,
                 responseType: 'detail',
                 programs: [programContext.program],
                 knowledge: knowledgeHits.map(hit => hit.id),
-                timestamp: Date.now(),
             });
             return;
         }
         if (programContext.ambiguous) {
-            const searchInput = `${cleanMessage} ${safeHistory.map(item => item.content).join(' ')}`;
-            const programs = ProgramService_1.default.search({
-                qualification: searchInput,
-                gpa: '',
-                interests: searchInput,
-                preferredCountry: '',
-            });
-            if (programs.length > 0) {
-                const recommendation = buildProgramRecommendationReply(programs, responseLanguage);
-                res.json({
-                    reply: recommendation.reply,
+            const level = inferLevel(`${cleanMessage} ${safeHistory.map(m => m.content).join(' ')}`);
+            if (level !== 'Any') {
+                const searchInput = `${cleanMessage} ${safeHistory.map(item => item.content).join(' ')}`;
+                const programs = ProgramService_1.default.search({
+                    qualification: searchInput,
+                    gpa: '',
+                    interests: searchInput,
+                    preferredCountry: '',
+                    targetLevel: level,
+                });
+                if (programs.length > 0) {
+                    const recommendation = buildProgramRecommendationReply(programs, responseLanguage);
+                    await sendResponse(res, cleanMessage, safeHistory, responseLanguage, {
+                        reply: recommendation.reply,
+                        responseLanguage,
+                        responseType: 'recommendation',
+                        programs: recommendation.programs,
+                        knowledge: knowledgeHits.map(hit => hit.id),
+                    });
+                    return;
+                }
+                await sendResponse(res, cleanMessage, safeHistory, responseLanguage, {
+                    reply: responseLanguage === 'hi'
+                        ? 'पिछली सूची में आप किस कोर्स की बात कर रहे हैं?'
+                        : 'Which course do you mean from the previous list?',
                     responseLanguage,
-                    responseType: 'recommendation',
-                    programs: recommendation.programs,
-                    knowledge: knowledgeHits.map(hit => hit.id),
-                    timestamp: Date.now(),
                 });
                 return;
             }
-            res.json({
-                reply: responseLanguage === 'hi'
-                    ? 'पिछली सूची में आप किस कोर्स की बात कर रहे हैं?'
-                    : 'Which course do you mean from the previous list?',
-                responseLanguage,
-                timestamp: Date.now(),
-            });
-            return;
         }
         // ── Analyze intent ─────────────────────────────────────────────────────
         let analysis = await GeminiService_1.default.analyzeConversation(cleanMessage, safeHistory);
@@ -682,11 +809,10 @@ const chatController = async (req, res) => {
         // ── Course recommendation flow ─────────────────────────────────────────
         if (analysis?.topic === 'course' && analysis?.profile) {
             if (requestedLevel === 'PG' && hasSchoolQualification(combinedUserText) && !hasBachelorQualification(combinedUserText)) {
-                res.json({
+                await sendResponse(res, cleanMessage, safeHistory, responseLanguage, {
                     reply: buildMasterPathReply(responseLanguage),
                     responseLanguage,
                     responseType: 'general',
-                    timestamp: Date.now(),
                     rules: relevantRules.map(rule => rule.id),
                     knowledge: knowledgeHits.map(hit => hit.id),
                 });
@@ -707,7 +833,7 @@ const chatController = async (req, res) => {
                     ? `Ask ONE specific question to collect this: ${missingFieldsText.join(', ')}. Do NOT ask the same question twice.`
                     : 'Ask ONE clarifying question to better understand their profile.';
                 const followUp = await GeminiService_1.default.chat(missingInfo, safeHistory, { temperature: 0.3, language: responseLanguage });
-                res.json({ reply: followUp, responseLanguage, timestamp: Date.now() });
+                await sendResponse(res, cleanMessage, safeHistory, responseLanguage, { reply: followUp, responseLanguage });
                 return;
             }
             // Have enough info — search catalog and explain matches
@@ -730,14 +856,13 @@ const chatController = async (req, res) => {
                         ? 'ये कुछ दूसरे अच्छे options हैं:'
                         : 'Here are other good options from my catalog:'
                     : undefined);
-            res.json({
+            await sendResponse(res, cleanMessage, safeHistory, responseLanguage, {
                 reply,
                 responseLanguage,
                 responseType: 'recommendation',
                 programs: programs.length ? programs : allPrograms,
                 rules: relevantRules.map(rule => rule.id),
                 knowledge: knowledgeHits.map(hit => hit.id),
-                timestamp: Date.now(),
             });
             return;
         }
@@ -747,7 +872,7 @@ const chatController = async (req, res) => {
             userImage,
             language: responseLanguage,
         });
-        res.json({ reply, responseLanguage, timestamp: Date.now() });
+        await sendResponse(res, cleanMessage, safeHistory, responseLanguage, { reply, responseLanguage });
     }
     catch (error) {
         console.error('[ChatController] Error:', error?.message || error);

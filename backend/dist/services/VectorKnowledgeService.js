@@ -30,8 +30,41 @@ const STOP_WORDS = new Set([
     'what',
     'with',
     'you',
+    // Hindi/Hinglish stop words
+    'में',
+    'के',
+    'का',
+    'को',
+    'की',
+    'है',
+    'हैं',
+    'था',
+    'थी',
+    'थे',
+    'और',
+    'से',
+    'पर',
+    'भी',
+    'तो',
+    'ही',
+    'हो',
+    'कर',
+    'करो',
+    'करके',
+    'कैन',
+    'यू',
+    'karo',
+    'kar',
+    'do',
+    'plez',
+    'please'
 ]);
-const normalize = (text) => text.toLowerCase().replace(/[\u2018\u2019]/g, "'").replace(/[^a-z0-9%+.\s]/g, ' ').replace(/\s+/g, ' ').trim();
+const normalize = (text) => text
+    .toLowerCase()
+    .replace(/[\u2018\u2019]/g, "'")
+    .replace(/[^a-z0-9%+.\s\u0900-\u097F]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
 const tokenize = (text) => normalize(text)
     .split(' ')
     .filter(token => token.length > 1 && !STOP_WORDS.has(token));
@@ -77,18 +110,80 @@ const buildDocuments = () => {
         type: 'rule',
         text: `${rule.text} Keywords: ${rule.keywords.join(', ')}`,
     }));
-    const programDocs = programCatalog_1.PROGRAM_CATALOG.map(program => ({
-        id: `program:${program.name}`,
-        type: 'program',
-        text: [
-            `${program.name} at ${program.university}, ${program.country}.`,
-            `Level: ${program.level}. Duration: ${program.duration}. Intake: ${program.intake}.`,
-            `Eligibility: ${program.eligibility}.`,
-            `Fields: ${program.fields.join(', ')}.`,
-            `Career outcomes: ${program.careerOpportunities.join(', ')}.`,
-        ].join(' '),
-    }));
-    return [...appDocs, ...ruleDocs, ...programDocs].map(document => ({
+    const conversationalDocs = [
+        {
+            id: 'pattern:save',
+            type: 'app',
+            text: 'Save bookmark keep program सेव सेव करो सेव कर दो बचाओ रखो please save save bachelor of. Action: save the program to user profile.',
+        },
+        {
+            id: 'pattern:detail',
+            type: 'app',
+            text: 'Tell me about details of details qualification eligibility duration बताओ जानकारी डिटेल information university country. Action: show program details.',
+        },
+        {
+            id: 'pattern:recommend',
+            type: 'app',
+            text: 'Recommend find search courses list computer science business engineering find courses suggest courses list. Action: list program recommendations.',
+        },
+        {
+            id: 'pattern:career',
+            type: 'app',
+            text: 'Career jobs scope salary outcomes placement भविष्य नौकरी करियर स्कोप. Action: describe career options.',
+        }
+    ];
+    const programDocs = [];
+    programCatalog_1.PROGRAM_CATALOG.forEach(program => {
+        // 1. General English description
+        programDocs.push({
+            id: `program:${program.name}:general`,
+            type: 'program',
+            text: `${program.name} details: offered at ${program.university} in ${program.country}. Level: ${program.level}, Duration: ${program.duration}, Intake: ${program.intake}. Eligibility: ${program.eligibility}. Fields: ${program.fields.join(', ')}.`,
+        });
+        // 2. Hindi General details
+        programDocs.push({
+            id: `program:${program.name}:general_hi`,
+            type: 'program',
+            text: `${program.name} की जानकारी: विश्वविद्यालय: ${program.university}, देश: ${program.country}, स्तर: ${program.level}, अवधि: ${program.duration}, दाखिला/इनटेक: ${program.intake}, योग्यता/एलिजिबिलिटी: ${program.eligibility}.`,
+        });
+        // 3. Eligibility/Qualifications English
+        programDocs.push({
+            id: `program:${program.name}:eligibility`,
+            type: 'program',
+            text: `Eligibility and qualifications for ${program.name} at ${program.university}: ${program.eligibility}. Requirements include ${program.minQualificationKeywords.join(', ')}.`,
+        });
+        // 4. Eligibility/Qualifications Hindi
+        programDocs.push({
+            id: `program:${program.name}:eligibility_hi`,
+            type: 'program',
+            text: `${program.name} के लिए पात्रता और योग्यता: ${program.eligibility}. इसके लिए न्यूनतम योग्यता ${program.minQualificationKeywords.join(', ')} की आवश्यकता है।`,
+        });
+        // 5. Careers English
+        programDocs.push({
+            id: `program:${program.name}:careers`,
+            type: 'program',
+            text: `Career outcomes, jobs, salary, and scope for ${program.name} from ${program.university}: ${program.careerOpportunities.join(', ')}.`,
+        });
+        // 6. Careers Hindi
+        programDocs.push({
+            id: `program:${program.name}:careers_hi`,
+            type: 'program',
+            text: `${program.name} के बाद करियर के अवसर, नौकरियां, भविष्य, स्कोप: ${program.careerOpportunities.join(', ')}.`,
+        });
+        // 7. Intake & Duration English
+        programDocs.push({
+            id: `program:${program.name}:duration_intake`,
+            type: 'program',
+            text: `Duration and intake session for ${program.name} at ${program.university}: duration is ${program.duration}, intake is during ${program.intake}.`,
+        });
+        // 8. Intake & Duration Hindi
+        programDocs.push({
+            id: `program:${program.name}:duration_intake_hi`,
+            type: 'program',
+            text: `${program.name} की अवधि और दाखिला: अवधि ${program.duration} है और इनटेक/दाखिला ${program.intake} में होता है।`,
+        });
+    });
+    return [...appDocs, ...ruleDocs, ...conversationalDocs, ...programDocs].map(document => ({
         ...document,
         vector: toVector(document.text),
     }));

@@ -50,6 +50,30 @@ exports.APP_RULES = [
         keywords: ['what you think', 'is it good', 'should i', 'go with', 'better'],
         text: 'When the user asks for an opinion, give a clear recommendation with one reason and one caution.',
     },
+    {
+        id: 'answer_before_list',
+        priority: 95,
+        keywords: ['tell me', 'about', 'details', 'qualification', 'eligibility', 'duration', 'fees', 'intake', 'बताओ', 'जानकारी', 'डिटेल'],
+        text: 'If the user asks a specific question or wants details about a specific program, answer that question directly using the program details. Do NOT show a program list.',
+    },
+    {
+        id: 'save_intent',
+        priority: 96,
+        keywords: ['save', 'bookmark', 'सेव', 'कैन यू सावे', 'प्लीज सेव', 'सेव करो'],
+        text: 'When the user wants to save, bookmark, or keep a program (e.g. says save/सेव), save the mentioned program using the save action and confirm the save. Do NOT list unrelated courses.',
+    },
+    {
+        id: 'no_repeat',
+        priority: 97,
+        keywords: ['again', 'repeat', 'recommend', 'computer', 'course', 'program', 'courses', 'programs'],
+        text: 'Never output the same recommendation list of programs twice. If you have already recommended a set of programs, focus on addressing the user’s follow-up query directly or ask clarifying questions.',
+    },
+    {
+        id: 'detail_vs_list',
+        priority: 98,
+        keywords: ['bachelor', 'master', 'diploma', 'science', 'technology', 'management', 'engineering'],
+        text: 'When the user mentions one specific program name (e.g. "Bachelor of Computer Science" or "बैचलर ऑफ़ कंप्यूटर साइंस"), provide information or details about that specific program instead of listing other different courses.',
+    },
 ];
 const normalize = (text) => text.toLowerCase().replace(/[\u2018\u2019]/g, "'").replace(/\s+/g, ' ').trim();
 const findRelevantAppRules = (text, limit = 3) => {

@@ -135,14 +135,9 @@ const includesAny = (text: string, keywords: string[]) =>
 const containsDevanagari = (text: string) => /[\u0900-\u097F]/.test(text);
 
 const detectReplyLanguage = (userMessage: string, history: Array<{role: 'user' | 'assistant'; content: string; image?: string | null}>): 'hi' | 'en' => {
-  // Most reliable: Check if current message has Devanagari script
+  // Most reliable: decide from the current message only.
   if (containsDevanagari(userMessage)) return 'hi';
-  
-  // Check recent conversation for language pattern (last 3 exchanges)
-  const recentHistory = history.slice(-6);
-  const hasRecentHindi = recentHistory.some(item => containsDevanagari(item.content));
-  if (hasRecentHindi) return 'hi';
-  
+
   // Check for Hindi grammar patterns
   const normalized = normalize(userMessage);
   const hindiPatterns = [

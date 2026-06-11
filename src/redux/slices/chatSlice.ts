@@ -2,7 +2,8 @@ import {createAsyncThunk, createSlice, PayloadAction} from '@reduxjs/toolkit';
 import {Message, ChatRequest, ChatResponse} from '../../models/ChatModel';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import uuid from 'react-native-uuid';
-import ChatApi from '../../services/ChatApi'; // ← use backend API, not Gemini directly
+import {processChat} from '../../services/ChatEngine';
+import {PROGRAM_CATALOG} from '../../data/programCatalog';
 
 const uuidv4 = () => uuid.v4() as string;
 
@@ -36,7 +37,7 @@ export const loadChatHistory = createAsyncThunk('chat/loadHistory', async () => 
   }
 });
 
-// ─── Send message → backend → Ollama ─────────────────────────────────────────
+// ─── Send message via local ChatEngine (direct Gemini API) ───────────────────
 export const sendMessage = createAsyncThunk(
   'chat/sendMessage',
   async (
@@ -44,20 +45,14 @@ export const sendMessage = createAsyncThunk(
     {rejectWithValue},
   ) => {
     try {
-      const request: ChatRequest = {
-        message: userMessage,
-        history: history.map(m => ({
-          role: m.role,
-          content: m.content,
-          image: m.image || null,
-          inputMode: m.inputMode,
-          programs: m.programs,
-        })),
-        image: image || null,
-      };
+      const directHistory = history.map(m => ({
+        role: m.role as 'user' | 'assistant',
+        content: m.content,
+        image: m.image || null,
+        programs: m.programs,
+      }));
 
-      // Calls your backend /chat endpoint which talks to Ollama
-      const result: ChatResponse = await ChatApi.sendMessage(request);
+      const result = await processChat(userMessage, directHistory, image);
 
       if (!result?.reply) {
         return rejectWithValue('No response received from AI service');
@@ -67,11 +62,21 @@ export const sendMessage = createAsyncThunk(
         reply: result.reply,
         responseLanguage: result.responseLanguage,
         responseType: result.responseType,
-        programs: result.programs ?? [],
+        programs: (result.programs ?? []).map(p => ({
+          name: p.name,
+          university: p.university,
+          country: p.country,
+          duration: p.duration,
+          intake: p.intake,
+          eligibility: p.eligibility,
+          careerOpportunities: p.careerOpportunities,
+          matchScore: (p as any).matchScore ?? 0,
+        })),
         timestamp: result.timestamp ?? Date.now(),
       };
     } catch (error: any) {
-      return rejectWithValue(error?.message || 'Failed to connect to AI service');
+      console.error('Chat processing failed:', error?.message || error);
+      return rejectWithValue(error?.message || 'Failed to process message');
     }
   },
 );
@@ -110,6 +115,27 @@ const chatSlice = createSlice({
       };
       state.messages.push(msg);
       state.totalChats += 1;
+      saveToChatStorage(state.messages);
+    },
+    addAssistantMessage: (
+      state,
+      action: PayloadAction<{
+        content: string;
+        responseLanguage?: 'hi' | 'en';
+        responseType?: 'recommendation' | 'detail' | 'general';
+        programs?: Message['programs'];
+        timestamp?: number;
+      }>,
+    ) => {
+      state.messages.push({
+        id: uuidv4(),
+        role: 'assistant',
+        content: action.payload.content,
+        responseLanguage: action.payload.responseLanguage,
+        responseType: action.payload.responseType,
+        programs: action.payload.programs?.length ? action.payload.programs : undefined,
+        timestamp: action.payload.timestamp || Date.now(),
+      });
       saveToChatStorage(state.messages);
     },
     clearError: state => {
@@ -168,5 +194,5 @@ const chatSlice = createSlice({
   },
 });
 
-export const {addUserMessage, clearError, setTyping} = chatSlice.actions;
+export const {addUserMessage, addAssistantMessage, clearError, setTyping} = chatSlice.actions;
 export default chatSlice.reducer;

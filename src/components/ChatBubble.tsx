@@ -99,16 +99,16 @@ const ChatBubble: React.FC<ChatBubbleProps> = ({message, onSaveProgram, isProgra
             <TouchableOpacity
               style={[
                 styles.saveProgramButton,
-                isProgramSaved?.(primaryProgram) && styles.saveProgramButtonSaved,
+                isProgramSaved?.(primaryProgram!) && styles.saveProgramButtonSaved,
               ]}
-              onPress={() => onSaveProgram?.(primaryProgram)}
+              onPress={() => onSaveProgram?.(primaryProgram!)}
               activeOpacity={0.8}>
               <Text
                 style={[
                   styles.saveProgramButtonText,
-                  isProgramSaved?.(primaryProgram) && styles.saveProgramButtonTextSaved,
+                  isProgramSaved?.(primaryProgram!) && styles.saveProgramButtonTextSaved,
                 ]}>
-                {isProgramSaved?.(primaryProgram) ? '✓ Saved' : 'Save Program'}
+                {isProgramSaved?.(primaryProgram!) ? '✓ Saved' : 'Save Program'}
               </Text>
             </TouchableOpacity>
           ) : null}
