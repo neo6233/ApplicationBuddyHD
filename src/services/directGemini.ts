@@ -79,15 +79,17 @@ const toContents = (
   return contents;
 };
 
-export const isDirectGeminiAvailable = (): boolean => Boolean(GEMINI_API_KEY);
+export const isDirectGeminiAvailable = (): boolean => canUseDirectGemini();
+
+const canUseDirectGemini = (): boolean => Boolean(GEMINI_API_KEY);
 
 export const directGeminiChat = async (
   userMessage: string,
   history: Array<{role: 'user' | 'assistant'; content: string; image?: string | null}>,
   options?: {temperature?: number; maxOutputTokens?: number; userImage?: string | null},
 ): Promise<string> => {
-  if (!GEMINI_API_KEY) {
-    throw new Error('GEMINI_API_KEY is not configured for direct chat mode.');
+  if (!canUseDirectGemini()) {
+    throw new Error('GEMINI_API_KEY is not configured.');
   }
 
   const controller = new AbortController();

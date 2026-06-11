@@ -135,6 +135,23 @@ const detectResponseLanguage = (message: string, history: ConversationMessage[])
   return 'en' as const;
 };
 
+const isGreetingMessage = (text: string) => {
+  const normalized = normalize(text);
+  return includesAny(normalized, [
+    'hi',
+    'hii',
+    'hello',
+    'hey',
+    'good morning',
+    'good afternoon',
+    'good evening',
+    'how are you',
+    'what is this',
+    'who are you',
+    'tell me about yourself',
+  ]);
+};
+
 const PROGRAM_NAME_LIST = [...PROGRAM_CATALOG]
   .map(program => program.name)
   .sort((a, b) => b.length - a.length);
@@ -177,7 +194,7 @@ const getCatalogProgramByName = (programName?: string) => {
 
 const isFollowUpProgramQuestion = (text: string) => {
   const normalized = normalize(text);
-  return /\bit\b/i.test(normalized) || includesAny(normalized, [
+  return /it/i.test(normalized) || includesAny(normalized, [
     'this course',
     'that course',
     'this program',
@@ -193,9 +210,10 @@ const isFollowUpProgramQuestion = (text: string) => {
     'when',
     'start',
     'about',
-    'tell me',
-    'what is',
-    'what are',
+    'tell me about this',
+    'what is this course',
+    'what is this program',
+    'what about this',
   ]);
 };
 
@@ -642,7 +660,7 @@ export const chatController = async (req: Request, res: Response) => {
     const cleanMessage = message.trim();
     const responseLanguage = detectResponseLanguage(cleanMessage, safeHistory);
     const historyText = safeHistory.map(item => item.content).join(' ');
-    const knowledgeHits = VectorKnowledgeService.search(`${historyText} ${cleanMessage}`);
+    const knowledgeHits = VectorKnowledgeService.search(cleanMessage);
 
     // ── "List all" shortcut ────────────────────────────────────────────────
     const listAllRegex = /\b(all|list|show all|give me all|show|display|tell me)\b.*\b(course|program|option|programs|courses)s?\b/i;
@@ -662,6 +680,12 @@ export const chatController = async (req: Request, res: Response) => {
       return;
     }
     const userImage = typeof image === 'string' ? image : undefined;
+
+    if (isGreetingMessage(cleanMessage)) {
+      const reply = await GeminiService.chat(cleanMessage, safeHistory, {userImage, language: responseLanguage});
+      res.json({reply, responseLanguage, timestamp: Date.now()});
+      return;
+    }
 
     // ── Direct program follow-up flow ─────────────────────────────────────
     const programContext = resolveProgramFromConversation(cleanMessage, safeHistory);
@@ -717,22 +741,14 @@ export const chatController = async (req: Request, res: Response) => {
       return;
     }
 
-    // ── Greeting shortcut — skip analysis, just reply ──────────────────────
-    const greetings = ['hi', 'hii', 'hello', 'hey', 'good morning', 'good afternoon', 'good evening'];
-    if (greetings.includes(cleanMessage.toLowerCase())) {
-      const reply = await GeminiService.chat(cleanMessage, safeHistory, {userImage, language: responseLanguage});
-      res.json({reply, responseLanguage, timestamp: Date.now()});
-      return;
-    }
-
     // ── Analyze intent ─────────────────────────────────────────────────────
     let analysis = await GeminiService.analyzeConversation(cleanMessage, safeHistory);
     console.log('[ANALYSIS BEFORE PROCESSING]', JSON.stringify(analysis, null, 2));
     
     // ── LOCAL EXTRACTION — Fill gaps in Gemini analysis ────────────────────
     const localData = extractProfileLocally(cleanMessage, safeHistory);
-    const combinedText = normalize(`${historyText} ${cleanMessage}`);
-    const combinedUserText = normalize(`${safeHistory.filter(item => item.role === 'user').map(item => item.content).join(' ')} ${cleanMessage}`);
+    const combinedText = normalize(cleanMessage);
+    const combinedUserText = normalize(cleanMessage);
     const currentRequestedLevel = inferRequestedProgramLevel(cleanMessage);
     const previousRequestedLevel = inferRequestedProgramLevel(safeHistory.map(item => item.content).join(' '));
     const requestedLevel = currentRequestedLevel || previousRequestedLevel || (localData.level || undefined);

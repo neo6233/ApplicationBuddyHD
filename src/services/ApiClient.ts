@@ -1,6 +1,5 @@
 import axios, {
   AxiosInstance,
-  AxiosRequestConfig,
   AxiosResponse,
   InternalAxiosRequestConfig,
 } from 'axios';
@@ -26,7 +25,7 @@ ApiClient.interceptors.request.use(
       if (token && config.headers) {
         config.headers.Authorization = `Bearer ${token}`;
       }
-    } catch (_) {
+    } catch {
       // Silently fail if AsyncStorage unavailable
     }
     return config;
@@ -69,7 +68,7 @@ ApiClient.interceptors.response.use(
       }
     } else if (error.request) {
       error.message =
-        'Network error. Please check your internet connection.';
+        'Cannot reach the backend. On a physical device, set BACKEND_URL to your computer\'s LAN IP, for example http://192.168.1.20:5000/api, and make sure the backend is running. On Android emulator, use http://10.0.2.2:5000/api; on iOS simulator, use http://localhost:5000/api.';
     } else {
       error.message = 'An unexpected error occurred.';
     }

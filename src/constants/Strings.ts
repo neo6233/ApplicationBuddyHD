@@ -68,7 +68,8 @@ const Strings = {
   PROFILE_DEFAULT_EMAIL: 'student@example.com',
 
   // Errors
-  ERROR_NETWORK: 'Network error. Please check your connection.',
+  ERROR_NETWORK:
+    'Cannot reach the backend. On a physical device, point BACKEND_URL to your computer\'s LAN IP.',
   ERROR_SERVER: 'Server error. Please try again later.',
   ERROR_VALIDATION: 'Please fill all required fields.',
   ERROR_UNKNOWN: 'Something went wrong. Please try again.',

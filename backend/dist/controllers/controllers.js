@@ -125,6 +125,22 @@ const detectResponseLanguage = (message, history) => {
     // Default to English for ambiguous cases
     return 'en';
 };
+const isGreetingMessage = (text) => {
+    const normalized = normalize(text);
+    return includesAny(normalized, [
+        'hi',
+        'hii',
+        'hello',
+        'hey',
+        'good morning',
+        'good afternoon',
+        'good evening',
+        'how are you',
+        'what is this',
+        'who are you',
+        'tell me about yourself',
+    ]);
+};
 const PROGRAM_NAME_LIST = [...programCatalog_1.PROGRAM_CATALOG]
     .map(program => program.name)
     .sort((a, b) => b.length - a.length);
@@ -158,7 +174,7 @@ const getCatalogProgramByName = (programName) => {
 };
 const isFollowUpProgramQuestion = (text) => {
     const normalized = normalize(text);
-    return /\bit\b/i.test(normalized) || includesAny(normalized, [
+    return /it/i.test(normalized) || includesAny(normalized, [
         'this course',
         'that course',
         'this program',
@@ -174,9 +190,10 @@ const isFollowUpProgramQuestion = (text) => {
         'when',
         'start',
         'about',
-        'tell me',
-        'what is',
-        'what are',
+        'tell me about this',
+        'what is this course',
+        'what is this program',
+        'what about this',
     ]);
 };
 const hasFreshQualificationSignal = (text) => {
@@ -519,7 +536,7 @@ const chatController = async (req, res) => {
         const cleanMessage = message.trim();
         const responseLanguage = detectResponseLanguage(cleanMessage, safeHistory);
         const historyText = safeHistory.map(item => item.content).join(' ');
-        const knowledgeHits = VectorKnowledgeService_1.default.search(`${historyText} ${cleanMessage}`);
+        const knowledgeHits = VectorKnowledgeService_1.default.search(cleanMessage);
         // ── "List all" shortcut ────────────────────────────────────────────────
         const listAllRegex = /\b(all|list|show all|give me all|show|display|tell me)\b.*\b(course|program|option|programs|courses)s?\b/i;
         const isListRequest = listAllRegex.test(cleanMessage) ||
@@ -537,6 +554,11 @@ const chatController = async (req, res) => {
             return;
         }
         const userImage = typeof image === 'string' ? image : undefined;
+        if (isGreetingMessage(cleanMessage)) {
+            const reply = await GeminiService_1.default.chat(cleanMessage, safeHistory, { userImage, language: responseLanguage });
+            res.json({ reply, responseLanguage, timestamp: Date.now() });
+            return;
+        }
         // ── Direct program follow-up flow ─────────────────────────────────────
         const programContext = resolveProgramFromConversation(cleanMessage, safeHistory);
         if (programContext.program) {
@@ -580,20 +602,13 @@ const chatController = async (req, res) => {
             });
             return;
         }
-        // ── Greeting shortcut — skip analysis, just reply ──────────────────────
-        const greetings = ['hi', 'hii', 'hello', 'hey', 'good morning', 'good afternoon', 'good evening'];
-        if (greetings.includes(cleanMessage.toLowerCase())) {
-            const reply = await GeminiService_1.default.chat(cleanMessage, safeHistory, { userImage, language: responseLanguage });
-            res.json({ reply, responseLanguage, timestamp: Date.now() });
-            return;
-        }
         // ── Analyze intent ─────────────────────────────────────────────────────
         let analysis = await GeminiService_1.default.analyzeConversation(cleanMessage, safeHistory);
         console.log('[ANALYSIS BEFORE PROCESSING]', JSON.stringify(analysis, null, 2));
         // ── LOCAL EXTRACTION — Fill gaps in Gemini analysis ────────────────────
         const localData = extractProfileLocally(cleanMessage, safeHistory);
-        const combinedText = normalize(`${historyText} ${cleanMessage}`);
-        const combinedUserText = normalize(`${safeHistory.filter(item => item.role === 'user').map(item => item.content).join(' ')} ${cleanMessage}`);
+        const combinedText = normalize(cleanMessage);
+        const combinedUserText = normalize(cleanMessage);
         const currentRequestedLevel = inferRequestedProgramLevel(cleanMessage);
         const previousRequestedLevel = inferRequestedProgramLevel(safeHistory.map(item => item.content).join(' '));
         const requestedLevel = currentRequestedLevel || previousRequestedLevel || (localData.level || undefined);
