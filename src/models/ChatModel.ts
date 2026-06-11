@@ -6,6 +6,7 @@ export interface Message {
   content: string;
   image?: string | null;
   inputMode?: 'voice' | 'text';
+  responseLanguage?: 'hi' | 'en';
   responseType?: 'recommendation' | 'detail' | 'general';
   programs?: Array<{
     name: string;
@@ -35,6 +36,7 @@ export interface ChatRequest {
 export interface ChatResponse {
   reply: string;
   timestamp: number;
+  responseLanguage?: 'hi' | 'en';
   responseType?: 'recommendation' | 'detail' | 'general';
   programs?: Array<{
     name: string;

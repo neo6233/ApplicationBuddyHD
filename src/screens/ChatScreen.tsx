@@ -173,7 +173,7 @@ useEffect(() => {
     void (async () => {
       try {
         await stopSpeaking();
-        await speak(latestAssistantMessage.content);
+        await speak(latestAssistantMessage.content, latestAssistantMessage.responseLanguage);
       } catch (error) {
         console.warn('[ChatScreen] TTS failed:', error);
       }
@@ -245,6 +245,17 @@ useEffect(() => {
     await sendText(inputText);
   }, [inputText, sendText]);
 
+  const detectVoiceLocale = useCallback((): 'en-IN' | 'hi-IN' => {
+    // Check if the last few assistant messages are in Hindi
+    const recentMessages = messages.slice(-4);
+    const lastAssistantMsg = [...recentMessages].reverse().find(m => m.role === 'assistant');
+    if (lastAssistantMsg?.responseLanguage === 'hi') {
+      return 'hi-IN';
+    }
+    // Default to English if unclear
+    return 'en-IN';
+  }, [messages]);
+
   const handleVoiceInput = useCallback(async () => {
     if (!isVoiceSupported()) {
       Alert.alert('Voice not supported', 'Your device does not support voice input.');
@@ -257,11 +268,12 @@ useEffect(() => {
     try {
       setIsListening(true);
       shouldSpeakNextReplyRef.current = true;
+      const locale = detectVoiceLocale();
       const result = await captureVoiceText({
-        locale: 'en-IN',
+        locale,
         onTranscript: text => setInputText(text),
       });
-      console.log('Voice capture result:', result);
+      console.log('Voice capture result:', result, 'Locale:', locale);
 
       if (result.error && !result.transcript && !result.error.includes('No speech detected') && !result.error.includes('timeout')) {
         Alert.alert('Voice input', result.error || 'Please try again');

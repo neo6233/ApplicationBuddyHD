@@ -108,15 +108,15 @@ const inferLevel = (q: string): 'UG' | 'PG' | 'Diploma' | 'Any' => {
 const inferField = (text: string): string | undefined => {
   const n = normalize(text);
   const patterns: Array<{keywords: string[]; value: string}> = [
-    {keywords: ['computer science', 'software', 'it', 'technology'], value: 'technology'},
-    {keywords: ['data science', 'machine learning', 'ai', 'artificial intelligence'], value: 'data'},
-    {keywords: ['business', 'management', 'commerce', 'finance', 'marketing'], value: 'business'},
-    {keywords: ['engineering', 'civil', 'mechanical', 'electrical', 'electronics'], value: 'engineering'},
-    {keywords: ['healthcare', 'nursing', 'pharmacy', 'medical', 'biology'], value: 'health'},
-    {keywords: ['education', 'teaching'], value: 'education'},
-    {keywords: ['law', 'legal'], value: 'law'},
-    {keywords: ['design', 'arts', 'media', 'animation'], value: 'arts'},
-    {keywords: ['cyber security', 'cybersecurity', 'security'], value: 'security'},
+    {keywords: ['computer science', 'software', 'programmer', 'developer', 'engineer', 'it', 'technology', 'coding'], value: 'technology'},
+    {keywords: ['data science', 'machine learning', 'ai', 'artificial intelligence', 'analytics'], value: 'data'},
+    {keywords: ['business', 'management', 'commerce', 'finance', 'marketing', 'mba', 'bba'], value: 'business'},
+    {keywords: ['engineering', 'civil', 'mechanical', 'electrical', 'electronics', 'chemical'], value: 'engineering'},
+    {keywords: ['healthcare', 'nursing', 'pharmacy', 'medical', 'biology', 'doctor', 'nurse'], value: 'health'},
+    {keywords: ['education', 'teaching', 'teacher', 'academic'], value: 'education'},
+    {keywords: ['law', 'legal', 'lawyer', 'llb'], value: 'law'},
+    {keywords: ['design', 'arts', 'media', 'animation', 'graphic'], value: 'arts'},
+    {keywords: ['cyber security', 'cybersecurity', 'security', 'hacking'], value: 'security'},
   ];
   return patterns.find(p => includesAny(n, p.keywords))?.value;
 };

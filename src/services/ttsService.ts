@@ -5,6 +5,17 @@ let voiceConfigPromise: Promise<void> | null = null;
 
 const normalizeText = (value: string) => value.toLowerCase().replace(/\s+/g, ' ').trim();
 
+const containsDevanagari = (text: string) => /[\u0900-\u097F]/.test(text);
+
+const detectPreferredLanguage = (text: string, override?: 'hi' | 'en'): 'hi' | 'en' => {
+  if (override) return override;
+  
+  // If text contains Devanagari script, it's definitely Hindi
+  if (containsDevanagari(text)) return 'hi';
+  
+  return 'en';
+};
+
 const ensureTtsReady = async (): Promise<void> => {
   if (initPromise) {
     return initPromise;
@@ -21,7 +32,7 @@ const ensureTtsReady = async (): Promise<void> => {
   return initPromise;
 };
 
-const selectIndianAccentVoice = async (): Promise<void> => {
+const selectIndianAccentVoice = async (language: 'hi' | 'en'): Promise<void> => {
   if (voiceConfigPromise) {
     return voiceConfigPromise;
   }
@@ -29,14 +40,16 @@ const selectIndianAccentVoice = async (): Promise<void> => {
   voiceConfigPromise = (async () => {
     try {
       const voices = (await (Tts as any).voices?.()) || [];
+      const targetLanguage = language === 'hi' ? 'hi-in' : 'en-in';
       const preferredVoice = voices.find((voice: any) => {
         const name = normalizeText(String(voice?.name || ''));
-        const language = normalizeText(String(voice?.language || ''));
+        const voiceLang = normalizeText(String(voice?.language || ''));
         return (
-          language === 'en-in' ||
-          language.startsWith('en-in') ||
+          voiceLang === targetLanguage ||
+          voiceLang.startsWith(targetLanguage) ||
           name.includes('india') ||
           name.includes('indian') ||
+          (targetLanguage === 'hi-in' && (name.includes('hindi') || name.includes('bharat')) ) ||
           name.includes('en-in')
         );
       });
@@ -44,13 +57,13 @@ const selectIndianAccentVoice = async (): Promise<void> => {
       if (preferredVoice?.id && typeof Tts.setDefaultVoice === 'function') {
         Tts.setDefaultVoice(preferredVoice.id);
       } else {
-        Tts.setDefaultLanguage('en-IN');
+        Tts.setDefaultLanguage(language === 'hi' ? 'hi-IN' : 'en-IN');
       }
 
       Tts.setDefaultRate(0.45);
       Tts.setDefaultPitch(1.0);
     } catch {
-      Tts.setDefaultLanguage('en-IN');
+      Tts.setDefaultLanguage(language === 'hi' ? 'hi-IN' : 'en-IN');
       Tts.setDefaultRate(0.45);
       Tts.setDefaultPitch(1.0);
     }
@@ -59,12 +72,17 @@ const selectIndianAccentVoice = async (): Promise<void> => {
   return voiceConfigPromise;
 };
 
-export async function speak(text: string): Promise<void> {
+export async function speak(text: string, language?: 'hi' | 'en'): Promise<void> {
   if (!text || typeof text !== 'string') return;
 
   try {
     await ensureTtsReady();
-    await selectIndianAccentVoice();
+    const preferredLanguage = detectPreferredLanguage(text, language);
+    
+    // Reset voice config cache when language changes to ensure proper voice selection
+    voiceConfigPromise = null;
+    
+    await selectIndianAccentVoice(preferredLanguage);
     await Tts.stop();
     await new Promise(resolve => setTimeout(resolve, 120));
     await Tts.speak(text);

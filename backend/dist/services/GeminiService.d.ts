@@ -58,6 +58,7 @@ declare class OllamaService {
         maxOutputTokens?: number;
         temperature?: number;
         userImage?: string | null;
+        language?: 'hi' | 'en';
     }): Promise<string>;
     checkEligibility(data: {
         qualification: string;

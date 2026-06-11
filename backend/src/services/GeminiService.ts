@@ -9,24 +9,31 @@ const CATALOG_SNAPSHOT = PROGRAM_CATALOG.map(
 // ─── System prompt (catalog-locked, 1-line replies) ───────────────────────────
 const SYSTEM_PROMPT = `You are ARIA, an AI Admission Counsellor.
 
-STRICT RULES — follow every one of them, no exceptions:
-1. You ONLY answer using the program catalog listed below. Never invent courses, universities, or requirements not in the catalog.
-2. If the answer is not in the catalog, say: "I don't have that info in my catalog right now."
-3. Reply in ONE short sentence (max 20 words). Never use bullet lists or long paragraphs.
-4. If the user greets you, reply naturally in one sentence.
-5. Ask only ONE follow-up question at a time when you need more info.
+⚠️ CRITICAL RULES - BREAK NONE OF THESE:
+1. **ONLY RECOMMEND PROGRAMS FROM THIS EXACT CATALOG.** Never create, invent, or suggest ANY program not listed.
+2. **IF A PROGRAM IS NOT IN THIS CATALOG, DO NOT MENTION IT. EVER.**
+3. **LANGUAGE RULE - EXTREMELY IMPORTANT:**
+   - If user speaks HINDI: Reply ONLY in pure Hindi with Devanagari. NO English words. NO mixing.
+   - If user speaks ENGLISH: Reply ONLY in English. NO Hindi words. NO mixing.
+4. Reply in ONE short sentence (max 15 words). NEVER use bullet points, lists, or multiple sentences.
+5. If asked about a program not in catalog, say: "This program is not in my catalog."
+6. When recommending, list ONLY exact catalog program names.
 
-PROGRAM CATALOG:
+PROGRAM CATALOG - USE ONLY EXACT NAMES FROM THIS LIST:
 ${CATALOG_SNAPSHOT}`;
 
 // ─── Default system prompt for non-program queries (allows broader answers) ────
 const DEFAULT_SYSTEM_PROMPT = `You are ARIA, an AI Admission Counsellor.
-Reply helpfully and concisely; do not invent catalog entries. Use full answers when needed.
-Ask one follow-up question at a time if more information is needed.`;
+
+⚠️ CRITICAL LANGUAGE RULE:
+- If user speaks HINDI: Reply ONLY in pure Hindi. NO English words EVER.
+- If user speaks ENGLISH: Reply ONLY in English. NO Hindi words EVER.
+
+Reply concisely in one sentence. Do not invent programs not in catalog.`;
 
 // ─── Ollama config — set OLLAMA_HOST in your .env if not running locally ──────
 const OLLAMA_CONFIG = {
-  baseUrl: process.env.OLLAMA_BASE_URL || 'http://localhost:11434',
+  baseUrl: process.env.OLLAMA_BASE_URL || 'http://192.168.6.180:5000',
   model:   process.env.OLLAMA_MODEL    || 'gemma3:4b',   // swap to any pulled model
   timeoutMs: Number(process.env.OLLAMA_TIMEOUT_MS || 30000),
 };
@@ -87,6 +94,32 @@ const normalize = (text: string) =>
 const includesAny = (text: string, keywords: string[]) =>
   keywords.some(kw => text.includes(kw));
 
+const containsDevanagari = (text: string) => /[\u0900-\u097F]/.test(text);
+
+const detectReplyLanguage = (userMessage: string, history: Array<{role: 'user' | 'assistant'; content: string; image?: string | null}>): 'hi' | 'en' => {
+  // Most reliable: Check if current message has Devanagari script
+  if (containsDevanagari(userMessage)) return 'hi';
+  
+  // Check recent conversation for language pattern (last 3 exchanges)
+  const recentHistory = history.slice(-6);
+  const hasRecentHindi = recentHistory.some(item => containsDevanagari(item.content));
+  if (hasRecentHindi) return 'hi';
+  
+  // Check for Hindi grammar patterns
+  const normalized = normalize(userMessage);
+  const hindiPatterns = [
+    ' mujhe ', ' kya ', ' kaise ', ' kyu ', ' kyun ', ' batao ', ' chahiye ', 
+    ' karna ', ' kaun ', ' kis ', ' aap ', ' hai ', ' hain ', ' aapka ', ' mere ',
+    ' karte ', ' kar ', ' sakte ', ' sakta ', ' sakti '
+  ];
+  
+  if (hindiPatterns.some(pattern => normalized.includes(pattern))) {
+    return 'hi';
+  }
+
+  return 'en';
+};
+
 const normalizeImageData = (image?: string | null): string | undefined => {
   if (!image) return undefined;
   return image.replace(/^data:image\/[a-zA-Z0-9.+-]+;base64,/, '').trim();
@@ -108,26 +141,37 @@ const parseNumericScore = (input: string): number | undefined => {
 
 const inferLevel = (q: string): 'UG' | 'PG' | 'Diploma' | 'Any' => {
   const t = normalize(q);
-  if (includesAny(t, ['phd', 'doctorate'])) return 'PG';
-  if (includesAny(t, ['master', 'msc', 'ma', 'mtech', 'mba', 'pg'])) return 'PG';
-  if (includesAny(t, ['diploma', 'certificate'])) return 'Diploma';
-  if (includesAny(t, ['bachelor', 'be', 'btech', 'b.sc', 'bba', 'undergraduate'])) return 'UG';
-  if (includesAny(t, ['high school', 'secondary', '12th', '10th'])) return 'UG';
+  if (includesAny(t, ['phd', 'doctorate', 'dr.'])) return 'PG';
+  if (includesAny(t, ['master', 'msc', 'ma', 'mtech', 'mba', 'pg', 'post graduate', 'postgraduate'])) return 'PG';
+  if (includesAny(t, ['diploma', 'certificate', 'polytechnic'])) return 'Diploma';
+  if (includesAny(t, ['bachelor', 'be', 'btech', 'b.sc', 'bba', 'undergraduate', 'ug', 'b.a', 'b.com'])) return 'UG';
+  if (includesAny(t, ['12th', '12 pass', 'class 12', 'high school', 'secondary', '10th', '10 pass'])) return 'UG';
+  // Hindi education levels
+  if (includesAny(t, ['12वीं', '12वीं पास', 'बारहवीं', 'दसवीं', '10वीं'])) return 'UG';
+  if (includesAny(t, ['स्नातक', 'स्नातकोत्तर', 'मास्टर्स', 'पीजी'])) return 'PG';
+  if (includesAny(t, ['डिप्लोमा'])) return 'Diploma';
   return 'Any';
+};
+
+const hasMinimalProfileInfo = (profile: any): boolean => {
+  // We need at least level AND field to have minimal info
+  const hasLevel = profile?.level && profile.level !== 'Any' && profile.level.trim().length > 0;
+  const hasField = profile?.field && profile.field.trim().length > 0;
+  return hasLevel && hasField;
 };
 
 const inferField = (text: string): string | undefined => {
   const n = normalize(text);
   const patterns: Array<{keywords: string[]; value: string}> = [
-    {keywords: ['computer science', 'software', 'it', 'technology'], value: 'technology'},
-    {keywords: ['data science', 'machine learning', 'ai', 'artificial intelligence'], value: 'data'},
-    {keywords: ['business', 'management', 'commerce', 'finance', 'marketing'], value: 'business'},
-    {keywords: ['engineering', 'civil', 'mechanical', 'electrical', 'electronics'], value: 'engineering'},
-    {keywords: ['healthcare', 'nursing', 'pharmacy', 'medical', 'biology'], value: 'health'},
-    {keywords: ['education', 'teaching'], value: 'education'},
-    {keywords: ['law', 'legal'], value: 'law'},
-    {keywords: ['design', 'arts', 'media', 'animation'], value: 'arts'},
-    {keywords: ['cyber security', 'cybersecurity', 'security'], value: 'security'},
+    {keywords: ['computer science', 'software', 'programmer', 'developer', 'engineer', 'it', 'technology', 'coding'], value: 'technology'},
+    {keywords: ['data science', 'machine learning', 'ai', 'artificial intelligence', 'analytics'], value: 'data'},
+    {keywords: ['business', 'management', 'commerce', 'finance', 'marketing', 'mba', 'bba'], value: 'business'},
+    {keywords: ['engineering', 'civil', 'mechanical', 'electrical', 'electronics', 'chemical'], value: 'engineering'},
+    {keywords: ['healthcare', 'nursing', 'pharmacy', 'medical', 'biology', 'doctor', 'nurse'], value: 'health'},
+    {keywords: ['education', 'teaching', 'teacher', 'academic'], value: 'education'},
+    {keywords: ['law', 'legal', 'lawyer', 'llb'], value: 'law'},
+    {keywords: ['design', 'arts', 'media', 'animation', 'graphic'], value: 'arts'},
+    {keywords: ['cyber security', 'cybersecurity', 'security', 'hacking'], value: 'security'},
   ];
   return patterns.find(p => includesAny(n, p.keywords))?.value;
 };
@@ -157,29 +201,48 @@ const scoreCatalogItem = (item: ProgramCatalogItem, data: ProgramFinderInput): n
 };
 
 // ─── Local fallback for offline / unreachable Ollama ─────────────────────────
-const buildLocalFallbackReply = (userMessage: string): string | null => {
+const buildLocalFallbackReply = (userMessage: string, language: 'hi' | 'en' = 'en'): string | null => {
   const msg = normalize(userMessage);
   if (includesAny(msg, ['duration', 'how long', 'years', 'months'])) {
     const match = PROGRAM_CATALOG.find(p =>
       normalize(p.name).split(' ').some(w => msg.includes(w) && w.length > 4),
     );
-    if (match) return `${match.name} is ${match.duration} long.`;
-    return `Programs range from 1 to 4 years depending on level and country.`;
+    if (match) {
+      return language === 'hi'
+        ? `${match.name} की अवधि ${match.duration} है.`
+        : `${match.name} is ${match.duration} long.`;
+    }
+    return language === 'hi'
+      ? 'पाठ्यक्रम की अवधि स्तर और देश के अनुसार 1 से 4 वर्ष तक होती है.'
+      : 'Programs range from 1 to 4 years depending on level and country.';
   }
   if (includesAny(msg, ['eligib', 'minimum', 'qualification', 'require', 'criteria'])) {
     const match = PROGRAM_CATALOG.find(p =>
       normalize(p.name).split(' ').some(w => msg.includes(w) && w.length > 4),
     );
-    if (match) return `Minimum for ${match.name}: ${match.eligibility}.`;
+    if (match) {
+      return language === 'hi'
+        ? `${match.name} के लिए पात्रता: ${match.eligibility}.`
+        : `Minimum for ${match.name}: ${match.eligibility}.`;
+    }
   }
   if (includesAny(msg, ['intake', 'when', 'start', 'semester'])) {
     const match = PROGRAM_CATALOG.find(p =>
       normalize(p.name).split(' ').some(w => msg.includes(w) && w.length > 4),
     );
-    if (match) return `${match.name} intake is ${match.intake}.`;
+    if (match) {
+      return language === 'hi'
+        ? `${match.name} का intake ${match.intake} है.`
+        : `${match.name} intake is ${match.intake}.`;
+    }
   }
   return null;
 };
+
+const buildLanguageInstruction = (language: 'hi' | 'en'): string =>
+  language === 'hi'
+    ? 'आप केवल हिंदी में जवाब दीजिए। कोई अंग्रेजी शब्द नहीं। शुद्ध हिंदी केवल।'
+    : 'Answer ONLY in English. NO Hindi words. Pure English only.';
 
 export const buildLocalProgramResponse = (data: ProgramFinderInput): ProgramFinderResponse => {
   const selected = [...PROGRAM_CATALOG]
@@ -302,10 +365,26 @@ class OllamaService {
       .map(i => `${i.role.toUpperCase()}: ${i.content}`)
       .join('\n');
 
-    const prompt = `Analyze this student conversation. Return JSON only, no markdown, no explanation.
-Greetings = topic:"general". Casual talk = topic:"general".
-topic:"course" ONLY when user asks about programs/degrees/universities/study abroad.
-JSON schema: {"topic":"course|eligibility|scholarship|visa|general","confidence":0.0,"needsMoreInfo":true,"followUpQuestion":"","summary":"","profile":{"level":"","field":"","country":"","qualification":"","score":"","englishScore":"","workExperience":""}}
+    const prompt = `ANALYZE conversation. Extract ALL profile info NOW. Return JSON only.
+
+CRITICAL - EXTRACT THESE IMMEDIATELY:
+
+LEVEL KEYWORDS (if found → set level):
+English: "12th", "12th pass", "secondary", "intermediate", "diploma", "bachelor", "B.Tech", "Masters", "MBA", "PG"
+Hindi: "12वीं", "बारहवीं", "इंटरमीडिएट", "डिप्लोमा", "स्नातक", "मास्टर्स", "एमबीए"
+RULE: If ANY of these found → set level. "12th/12वीं/Intermediate/इंटरमीडिएट" = "UG"
+
+FIELD KEYWORDS (if found → set field):
+English: "computer", "CS", "IT", "technology", "data science", "engineering", "business", "management", "healthcare", "law", "arts"
+Hindi: "कंप्यूटर", "सीएस", "आईटी", "टेक्नोलॉजी", "डेटा साइंस", "इंजीनियरिंग", "बिजनेस", "मैनेजमेंट"
+RULE: If ANY of these found → extract exact field name
+
+SCORE KEYWORDS: "%", "GPA", "percentage", "points"
+
+JSON schema: {"topic":"course|eligibility|scholarship|visa|general","confidence":0.0,"needsMoreInfo":false,"followUpQuestion":"","summary":"","profile":{"level":"UG|PG|Diploma|","field":"","country":"","qualification":"","score":"","englishScore":"","workExperience":""}}
+
+needsMoreInfo logic: TRUE ONLY if topic="course" AND level="" AND field="" (both empty)
+OTHERWISE needsMoreInfo=false
 
 Conversation:
 ${conversationText}
@@ -313,7 +392,7 @@ USER: ${userMessage}`;
 
     try {
       const raw = await this.callOllama({
-        systemPrompt: 'You are a strict JSON analyzer. Return valid JSON only, no extra text.',
+        systemPrompt: 'You are a strict JSON analyzer. Extract ALL available student profile information from the conversation. Return valid JSON only, no extra text.',
         messages: [{role: 'user', content: prompt}],
         temperature: 0,
         jsonMode: true,
@@ -336,6 +415,7 @@ USER: ${userMessage}`;
       maxOutputTokens?: number;
       temperature?: number;
       userImage?: string | null;
+      language?: 'hi' | 'en';
     },
   ): Promise<string> {
     // Convert history to Ollama message format (images ignored — use vision model if needed)
@@ -354,6 +434,7 @@ USER: ${userMessage}`;
     ];
 
     const hasImageAttachment = Boolean(normalizedUserImage);
+    const replyLanguage = options?.language || detectReplyLanguage(userMessage, history);
 
     const promptPrefix = hasImageAttachment
       ? 'The user attached an image. Inspect the image carefully and answer based on what is visible in it.'
@@ -378,14 +459,18 @@ USER: ${userMessage}`;
         selectedSystemPrompt = isCourseTopic ? SYSTEM_PROMPT : DEFAULT_SYSTEM_PROMPT;
       }
 
+      const languageInstruction = buildLanguageInstruction(replyLanguage);
+
       return await this.callOllama({
-        systemPrompt: promptPrefix ? `${promptPrefix}\n\n${selectedSystemPrompt}` : selectedSystemPrompt,
+        systemPrompt: promptPrefix
+          ? `${promptPrefix}\n\n${selectedSystemPrompt}\n\n${languageInstruction}`
+          : `${selectedSystemPrompt}\n\n${languageInstruction}`,
         messages,
         temperature: options?.temperature ?? 0.2,
       });
     } catch (err: any) {
       console.warn('[OllamaService] chat error — using local catalog fallback:', err.message);
-      const localReply = buildLocalFallbackReply(userMessage);
+      const localReply = buildLocalFallbackReply(userMessage, replyLanguage);
       if (localReply) return localReply;
       return "Ollama is unreachable right now. Please ensure it is running on your server.";
     }

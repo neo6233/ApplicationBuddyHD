@@ -65,6 +65,7 @@ export const sendMessage = createAsyncThunk(
 
       return {
         reply: result.reply,
+        responseLanguage: result.responseLanguage,
         responseType: result.responseType,
         programs: result.programs ?? [],
         timestamp: result.timestamp ?? Date.now(),
@@ -151,6 +152,7 @@ const chatSlice = createSlice({
           id: uuidv4(),
           role: 'assistant',
           content: action.payload.reply,
+          responseLanguage: action.payload.responseLanguage,
           responseType: action.payload.responseType,
           programs: action.payload.programs?.length ? action.payload.programs : undefined,
           timestamp: action.payload.timestamp,
