@@ -2,7 +2,7 @@ import { PROGRAM_CATALOG, ProgramCatalogItem } from '../data/programCatalog';
 import { findRelevantAppRules } from '../data/appRules';
 import VectorKnowledge from './VectorKnowledge';
 import ProgramService from './ProgramService';
-import { directGeminiChat, analyzeConversation, AssistantAnalysis } from './directGemini';
+import { directGeminiChat, analyzeConversation, AssistantAnalysis, buildSystemPrompt } from './directGemini';
 
 export interface ConversationMessage {
   role: 'user' | 'assistant';
@@ -74,11 +74,30 @@ const inferRequestedProgramLevel = (text: string): ProgramLevel | undefined => {
 };
 
 const hasSchoolQualification = (text: string) =>
-  includesAny(normalize(text), ['12th', '12 pass', 'class 12', 'high school', 'secondary', 'intermediate', '10th']);
+  includesAny(normalize(text), ['12th', '12 pass', 'class 12', 'high school', 'secondary', 'intermediate']);
 
 const hasBachelorQualification = (text: string) =>
   /\b(passed|completed|done|finished|have|holding)\s+(a\s+)?(bachelor|bachelor's|btech|b\.tech|b\.sc|bsc|b\.e|be|graduation|graduate)\b/i.test(text) ||
   /\b(bachelor's degree|bachelor degree|graduation completed|graduate with)\b/i.test(text);
+
+// Detect students who are below 12th grade (9th, 10th, 8th, etc.) — these are NOT eligible for catalog programs yet
+const hasBelowSecondaryQualification = (text: string): boolean => {
+  const t = normalize(text);
+  return (
+    includesAny(t, [
+      'after 10th', 'after 9th', 'after 8th', 'after 7th',
+      '10th pass', '9th pass', '8th pass',
+      '10 pass', '9 pass',
+      'class 10', 'class 9', 'class 8',
+      '10th grade', '9th grade', '8th grade',
+      'just completed 10', 'completed 10th', 'done 10th',
+      '10वीं', '9वीं', '8वीं', 'दसवीं', 'नौवीं',
+      'after ssc', 'after matric', 'matric pass',
+    ]) &&
+    // Make sure it's not someone saying "after 10th I did 12th"
+    !includesAny(t, ['12th', '12 pass', 'class 12', 'secondary', 'intermediate', 'bachelor', 'btech'])
+  );
+};
 
 const inferLevel = (text: string): 'UG' | 'PG' | 'Diploma' | 'Any' => {
   const t = normalize(text);
@@ -86,9 +105,11 @@ const inferLevel = (text: string): 'UG' | 'PG' | 'Diploma' | 'Any' => {
   if (includesAny(t, ['master', 'msc', 'ma', 'mtech', 'mba', 'pg', 'post graduate', 'postgraduate'])) return 'PG';
   if (includesAny(t, ['diploma', 'certificate', 'polytechnic'])) return 'Diploma';
   if (includesAny(t, ['bachelor', 'be', 'btech', 'b.sc', 'bba', 'undergraduate', 'ug', 'b.a', 'b.com'])) return 'UG';
-  if (includesAny(t, ['12th', '12 pass', 'class 12', 'high school', 'secondary', '10th', '10 pass'])) return 'UG';
+  // Only map 12th/Secondary to UG — NOT 10th (10th is below the catalog threshold)
+  if (includesAny(t, ['12th', '12 pass', 'class 12', 'high school', 'secondary', 'intermediate'])) return 'UG';
   // Hindi education levels
-  if (includesAny(t, ['12वीं', '12वीं पास', 'बारहवीं', 'दसवीं', '10वीं'])) return 'UG';
+  if (includesAny(t, ['12वीं', '12वीं पास', 'बारहवीं'])) return 'UG';
+  if (includesAny(t, ['दसवीं', '10वीं', '9वीं'])) return 'Any'; // below threshold
   if (includesAny(t, ['स्नातक', 'स्नातकोत्तर', 'मास्टर्स', 'पीजी'])) return 'PG';
   if (includesAny(t, ['डिप्लोमा'])) return 'Diploma';
   return 'Any';
@@ -97,7 +118,12 @@ const inferLevel = (text: string): 'UG' | 'PG' | 'Diploma' | 'Any' => {
 const extractProfileLocally = (message: string, history: ConversationMessage[]) => {
   const fullText = `${history.filter(h => h.role === 'user').map(h => h.content).join(' ')} ${message}`;
   const normalized = normalize(fullText);
-  
+
+  // If user is below 12th — do NOT map to any catalog level
+  if (hasBelowSecondaryQualification(fullText)) {
+    return { level: '' as '', field: '', score: '' };
+  }
+
   // Extract level
   let level: 'UG' | 'PG' | 'Diploma' | '' = '';
   if (includesAny(normalized, ['12th', '12वीं', 'बारहवीं', 'secondary', 'intermediate', 'इंटरमीडिएट'])) {
@@ -658,7 +684,7 @@ export const processChat = async (
       const reply = responseLanguage === 'hi'
         ? `${programToSave.name} आपके saved programs में जोड़ दिया गया है.`
         : `${programToSave.name} has been added to your saved programs.`;
-      
+
       return {
         reply,
         responseLanguage,
@@ -669,24 +695,7 @@ export const processChat = async (
     }
   }
 
-  // 2. "List all" shortcut
-  const listAllRegex = /\b(all|list|show all|give me all|show|display|tell me)\b.*\b(course|program|option|programs|courses)s?\b/i;
-  const isListRequest = listAllRegex.test(cleanMessage) ||
-                        includesAny(normalize(cleanMessage), ['course list', 'courses list', 'program list', 'list of programs', 'list of courses', 'all programs', 'all courses', 'सभी कोर्स', 'सभी प्रोग्राम']);
-  if (isListRequest) {
-    const programs = ProgramService.getAllPrograms();
-    return {
-      reply: responseLanguage === 'hi'
-        ? 'मेरे कैटलॉग में उपलब्ध सभी कोर्स यहाँ हैं:'
-        : 'Here are all the courses I have in my catalog:',
-      programs,
-      responseLanguage,
-      responseType: 'recommendation',
-      timestamp: Date.now(),
-    };
-  }
-
-  // 3. Greeting flow
+  // 2. Greeting flow — let Gemini handle it naturally
   if (isGreetingMessage(cleanMessage)) {
     const reply = await directGeminiChat(cleanMessage, safeHistory, { userImage, language: responseLanguage });
     return {
@@ -697,83 +706,46 @@ export const processChat = async (
     };
   }
 
-  // 4. Direct program follow-up flow
-  const programContext = resolveProgramFromConversation(cleanMessage, safeHistory);
-  if (programContext.program) {
-    const reply = buildThoughtfulProgramReply(
-      programContext.program,
-      cleanMessage,
-      safeHistory,
-      responseLanguage,
-      knowledgeHits,
-    );
-    
-    // Check for duplicate reply to break cycle
-    let finalReply = reply;
-    if (isDuplicateReply(finalReply, safeHistory)) {
-      const breakPrompt = `The user's query is: "${cleanMessage}". 
-I have already given the response: "${finalReply}" recently. 
-Please provide a different, helpful response in ${responseLanguage === 'hi' ? 'Hindi' : 'English'}. Answer their actual question directly, or ask a clarifying question. Do NOT repeat the list of courses or the previous answer.`;
-      
-      finalReply = await directGeminiChat(breakPrompt, safeHistory, { temperature: 0.7, language: responseLanguage });
-    }
+  // 2b. Below-secondary qualification (9th, 10th, 8th) — route to general counsellor Gemini
+  //     These students are NOT eligible for any catalog program yet, but deserve real guidance.
+  const fullConversationText = `${safeHistory.map(m => m.content).join(' ')} ${cleanMessage}`;
+  if (hasBelowSecondaryQualification(fullConversationText)) {
+    const generalCounsellorPrompt = `You are a helpful academic and career counsellor.
 
+The student asked: "${cleanMessage}"
+
+Context from conversation:
+${safeHistory.map(m => `${m.role.toUpperCase()}: ${m.content}`).join('\n')}
+
+IMPORTANT CONTEXT:
+- The student appears to be at 9th or 10th grade level.
+- Our admission programs ALL require at least 12th grade (Higher Secondary) as the minimum qualification.
+- So they are not yet eligible for our catalog programs.
+
+YOUR TASK:
+1. Acknowledge their current stage warmly.
+2. Explain that they need to complete 12th grade first to access our programs.
+3. Give practical, actionable pathway advice for what they can do right now:
+   - Continue studying to complete 10th and then 12th
+   - Mention vocational/ITI courses if applicable for 10th pass students
+   - Suggest subjects/streams they should focus on in 11th–12th based on their interest
+   - Mention that once they finish 12th, you can help them with international programs
+4. Keep it encouraging, warm, and concise (3–5 sentences max).
+5. Reply in ${responseLanguage === 'hi' ? 'Hindi ONLY' : 'English ONLY'}.`;
+
+    const reply = await directGeminiChat(generalCounsellorPrompt, safeHistory, {
+      temperature: 0.5,
+      language: responseLanguage,
+    });
     return {
-      reply: finalReply,
+      reply,
       responseLanguage,
-      responseType: 'detail',
-      programs: [programContext.program],
-      knowledge: knowledgeHits.map(hit => hit.id),
+      responseType: 'general',
       timestamp: Date.now(),
     };
   }
 
-  // Ambiguous program mention but level hint exists
-  if (programContext.ambiguous) {
-    const level = inferLevel(`${cleanMessage} ${safeHistory.map(m => m.content).join(' ')}`);
-    if (level !== 'Any') {
-      const searchInput = `${cleanMessage} ${safeHistory.map(item => item.content).join(' ')}`;
-      const programs = ProgramService.search({
-        qualification: searchInput,
-        gpa: '',
-        interests: searchInput,
-        preferredCountry: '',
-        targetLevel: level,
-      });
-
-      if (programs.length > 0) {
-        const recommendation = buildProgramRecommendationReply(programs, responseLanguage);
-        
-        let finalReply = recommendation.reply;
-        if (isDuplicateReply(finalReply, safeHistory)) {
-          const breakPrompt = `The user's query is: "${cleanMessage}". 
-I have already given the response: "${finalReply}" recently. 
-Please provide a different, helpful response in ${responseLanguage === 'hi' ? 'Hindi' : 'English'}. Answer their actual question directly, or ask a clarifying question. Do NOT repeat the list of courses or the previous answer.`;
-          
-          finalReply = await directGeminiChat(breakPrompt, safeHistory, { temperature: 0.7, language: responseLanguage });
-        }
-
-        return {
-          reply: finalReply,
-          responseLanguage,
-          responseType: 'recommendation',
-          programs: recommendation.programs,
-          knowledge: knowledgeHits.map(hit => hit.id),
-          timestamp: Date.now(),
-        };
-      }
-
-      return {
-        reply: responseLanguage === 'hi'
-          ? 'पिछली सूची में आप किस कोर्स की बात कर रहे हैं?'
-          : 'Which course do you mean from the previous list?',
-        responseLanguage,
-        timestamp: Date.now(),
-      };
-    }
-  }
-
-  // 5. General intent analysis via Gemini API
+  // 3. Analyse the conversation to understand student profile
   let analysis: AssistantAnalysis | null = null;
   try {
     analysis = await analyzeConversation(cleanMessage, safeHistory);
@@ -781,7 +753,7 @@ Please provide a different, helpful response in ${responseLanguage === 'hi' ? 'H
     console.warn('[ChatEngine] analyzeConversation error:', err);
   }
 
-  // 6. Fill gaps using Local Extraction
+  // Fill gaps using local keyword extraction
   const localData = extractProfileLocally(cleanMessage, safeHistory);
   const combinedText = normalize(cleanMessage);
   const combinedUserText = normalize(cleanMessage);
@@ -792,55 +764,42 @@ Please provide a different, helpful response in ${responseLanguage === 'hi' ? 'H
   const hasCourseContext = includesAny(combinedText, [
     'course', 'courses', 'program', 'programs', 'degree', 'study', 'studies',
     'admission', 'admissions', 'university', 'college', 'after 12th', '12th pass',
-    'class 12', 'secondary', 'intermediate', 'high school', 'master', 'diploma', 'bachelor'
+    'class 12', 'secondary', 'intermediate', 'high school', 'master', 'diploma', 'bachelor',
   ]);
 
   if (!analysis) {
-    analysis = {
-      topic: 'general',
-      confidence: 0,
-      needsMoreInfo: false,
-      profile: {},
-    };
+    analysis = { topic: 'general', confidence: 0, needsMoreInfo: false, profile: {} };
   }
-
   if (!analysis.profile) {
     analysis.profile = {};
   }
 
-  if (localData.level && !analysis.profile.level) {
-    analysis.profile.level = localData.level;
-  }
-  if (localData.field && !analysis.profile.field) {
-    analysis.profile.field = localData.field;
-  }
-  if (localData.score && !analysis.profile.score) {
-    analysis.profile.score = localData.score;
-  }
-  if (requestedLevel) {
-    analysis.profile.level = requestedLevel;
-  }
+  // Merge locally extracted profile into Gemini analysis
+  if (localData.level && !analysis.profile.level) { analysis.profile.level = localData.level; }
+  if (localData.field && !analysis.profile.field) { analysis.profile.field = localData.field; }
+  if (localData.score && !analysis.profile.score) { analysis.profile.score = localData.score; }
+  if (requestedLevel) { analysis.profile.level = requestedLevel; }
 
   if (hasCourseContext || analysis.profile.level || analysis.profile.field) {
     analysis.topic = 'course';
     analysis.confidence = Math.max(analysis.confidence || 0, 0.8);
   }
 
-  // Smart post-processing
+  // Infer level from full conversation if still missing
   if (analysis.topic === 'course' && analysis.profile) {
     if (!analysis.profile.level || analysis.profile.level === 'Any') {
       const inferredLevel = inferLevel(`${cleanMessage} ${safeHistory.map(m => m.content).join(' ')}`);
-      if (inferredLevel !== 'Any') {
-        analysis.profile.level = inferredLevel;
-      }
+      if (inferredLevel !== 'Any') { analysis.profile.level = inferredLevel; }
     }
     const hasLevel = analysis.profile.level && analysis.profile.level !== 'Any';
     const hasField = analysis.profile.field && analysis.profile.field.trim().length > 0;
     analysis.needsMoreInfo = !(hasLevel && hasField);
   }
 
-  // Course Recommendation Flow
+  // ── Course Intent ──────────────────────────────────────────────────────────
   if (analysis.topic === 'course' && analysis.profile) {
+
+    // Edge-case: 12th student asking for PG
     if (requestedLevel === 'PG' && hasSchoolQualification(combinedUserText) && !hasBachelorQualification(combinedUserText)) {
       return {
         reply: buildMasterPathReply(responseLanguage),
@@ -852,18 +811,18 @@ Please provide a different, helpful response in ${responseLanguage === 'hi' ? 'H
       };
     }
 
-    // Still missing info — ask one follow-up question
+    // Still missing info — ask a specific follow-up question via Gemini
     if (analysis.needsMoreInfo) {
-      const missingFieldsText = [];
-      if (!analysis.profile.level) missingFieldsText.push('education level (12th, B.Tech, etc.)');
-      if (!analysis.profile.field) missingFieldsText.push('field of interest (CS, engineering, etc.)');
-      if (!analysis.profile.score) missingFieldsText.push('academic score/GPA');
-      if (!analysis.profile.country) missingFieldsText.push('preferred country');
-      
-      const missingInfo = missingFieldsText.length > 0 
-        ? `Ask ONE specific question to collect this: ${missingFieldsText.join(', ')}. Do NOT ask the same question twice.`
+      const missingFieldsText: string[] = [];
+      if (!analysis.profile.level) { missingFieldsText.push('education level (12th, B.Tech, etc.)'); }
+      if (!analysis.profile.field) { missingFieldsText.push('field of interest (CS, engineering, business, etc.)'); }
+      if (!analysis.profile.score) { missingFieldsText.push('academic score/GPA'); }
+      if (!analysis.profile.country) { missingFieldsText.push('preferred study country'); }
+
+      const missingInfo = missingFieldsText.length > 0
+        ? `Ask ONE specific question to collect this missing info: ${missingFieldsText.join(', ')}. Do NOT ask the same question twice. Do NOT list courses yet.`
         : 'Ask ONE clarifying question to better understand their profile.';
-      
+
       const followUp = await directGeminiChat(missingInfo, safeHistory, { temperature: 0.3, language: responseLanguage });
       return {
         reply: followUp,
@@ -873,46 +832,67 @@ Please provide a different, helpful response in ${responseLanguage === 'hi' ? 'H
       };
     }
 
-    // Have enough info — search catalog and explain matches
-    const questionIntent = inferQuestionIntent(cleanMessage);
+    // Have enough profile info — search catalog for matches
     const allPrograms = ProgramService.search({
       qualification: `${analysis.profile.qualification || ''} ${combinedUserText}`,
       gpa:           analysis.profile.score || '',
       interests:     analysis.profile.field || '',
       preferredCountry: analysis.profile.country || '',
-      targetLevel: requestedLevel || 'Any',
+      targetLevel:   requestedLevel || 'Any',
     });
     const recentNames = getRecentlyRecommendedProgramNames(safeHistory);
-    const programs = questionIntent === 'alternative'
-      ? allPrograms.filter(program => !recentNames.has(normalize(program.name)))
+    const questionIntent = inferQuestionIntent(cleanMessage);
+    const filteredPrograms = questionIntent === 'alternative'
+      ? allPrograms.filter(p => !recentNames.has(normalize(p.name)))
       : allPrograms;
 
-    const reply = questionIntent === 'best_fit'
-      ? buildBestFitReply(programs.length ? programs : allPrograms, combinedUserText, responseLanguage)
-      : buildProgramRecommendationText(
-          programs.length ? programs : allPrograms,
-          responseLanguage,
-          questionIntent === 'alternative'
-            ? responseLanguage === 'hi'
-              ? 'ये कुछ दूसरे अच्छे options हैं:'
-              : 'Here are other good options from my catalog:'
-            : undefined,
-        );
+    const topPrograms = (filteredPrograms.length ? filteredPrograms : allPrograms).slice(0, 5);
 
-    let finalReply = reply;
+
+    // Build a catalog context string for Gemini
+    const catalogContext = topPrograms.length
+      ? topPrograms
+          .map(p => `• ${p.name} | ${p.university}, ${p.country} | ${p.duration} | Intake: ${p.intake} | Eligibility: ${p.eligibility} | Careers: ${p.careerOpportunities.slice(0, 2).join(', ')}`)
+          .join('\n')
+      : 'No close matches found in catalog. Advise generally based on your knowledge.';
+
+    // Let Gemini compose a context-aware, intelligent answer
+    const geminiPrompt = `The student just said: "${cleanMessage}"
+
+Conversation profile extracted so far:
+- Education Level: ${analysis.profile.level || 'Not specified'}
+- Field of Interest: ${analysis.profile.field || 'Not specified'}
+- Score/GPA: ${analysis.profile.score || 'Not specified'}
+- Preferred Country: ${analysis.profile.country || 'Not specified'}
+
+Matching programs from our catalog:
+${catalogContext}
+
+INSTRUCTIONS:
+1. Read the student's message carefully and answer EXACTLY what they asked.
+2. If they asked for a list → recommend the most suitable ones from above based on their profile.
+3. If they asked about careers → explain career paths.
+4. If they asked about one specific program → give details about that program only.
+5. Do NOT dump a generic list. Reason over their profile and the catalog context above.
+6. Keep the response concise (2–4 sentences or a short list of max 3 items).
+7. Reply in ${responseLanguage === 'hi' ? 'Hindi ONLY' : 'English ONLY'}.`;
+
+    let finalReply = await directGeminiChat(geminiPrompt, safeHistory, {
+      temperature: 0.5,
+      language: responseLanguage,
+      systemPrompt: buildSystemPrompt(),
+    });
+
     if (isDuplicateReply(finalReply, safeHistory)) {
-      const breakPrompt = `The user's query is: "${cleanMessage}". 
-I have already given the response: "${finalReply}" recently. 
-Please provide a different, helpful response in ${responseLanguage === 'hi' ? 'Hindi' : 'English'}. Answer their actual question directly, or ask a clarifying question. Do NOT repeat the list of courses or the previous answer.`;
-      
-      finalReply = await directGeminiChat(breakPrompt, safeHistory, { temperature: 0.7, language: responseLanguage });
+      const breakPrompt = `The student asked: "${cleanMessage}". Your last response was repeated. Give a FRESH, different helpful answer in ${responseLanguage === 'hi' ? 'Hindi' : 'English'} only.`;
+      finalReply = await directGeminiChat(breakPrompt, safeHistory, { temperature: 0.8, language: responseLanguage });
     }
 
     return {
       reply: finalReply,
       responseLanguage,
       responseType: 'recommendation',
-      programs: programs.length ? programs : allPrograms,
+      programs: topPrograms,
       rules: relevantRules.map(rule => rule.id),
       knowledge: knowledgeHits.map(hit => hit.id),
       timestamp: Date.now(),

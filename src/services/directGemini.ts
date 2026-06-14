@@ -1,5 +1,5 @@
-import {PROGRAM_CATALOG} from '../data/programCatalog';
-import {APP_RULES} from '../data/appRules';
+import { PROGRAM_CATALOG } from '../data/programCatalog';
+import { APP_RULES } from '../data/appRules';
 
 // ─── Config ──────────────────────────────────────────────────────────────────
 const GEMINI_API_KEY =
@@ -41,34 +41,39 @@ export interface AssistantAnalysis {
 }
 
 // ─── Build system prompt with catalog and rules ──────────────────────────────
-const buildSystemPrompt = () => {
+export const buildSystemPrompt = () => {
   const catalogSnapshot = PROGRAM_CATALOG.map(
     p =>
-      `\u2022 ${p.name} | ${p.university} | ${p.country} | ${p.duration} | Intake: ${p.intake} | Min: ${p.eligibility}`,
+      `• ${p.name} | ${p.university} | ${p.country} | ${p.duration} | Intake: ${p.intake} | Min: ${p.eligibility}`,
   ).join('\n');
 
   const rulesSnapshot = APP_RULES.slice(0, 6)
     .map(r => `- ${r.text}`)
     .join('\n');
 
-  return `You are ARIA, an AI Admission Counsellor.
+  return `You are ARIA, an AI Admission Counsellor with broad general knowledge about education and careers.
 
-STRICT RULES:
-1. Reply in one short paragraph (max 3 sentences).
-2. Use only programs from this catalog. NEVER invent programs.
-3. If the user speaks Hindi, reply ONLY in Hindi. If English, reply ONLY in English.
-4. Use only the current user message to choose the reply language.
-5. If the user asks "after 12th" or similar, recommend only UG/Diploma programs.
-6. Answer the current message directly. Do NOT repeat previous recommendations.
-7. If a user asks about ONE specific program, give details about THAT program only.
-8. Never give the same list of programs twice in a row.
+CRITICAL BEHAVIOR RULES:
+1. ALWAYS read what the student EXACTLY asked and answer THAT SPECIFIC question.
+2. NEVER respond with a generic catalog dump like "Here are all the courses I have in my catalog".
+3. If the student has shared their education level/field, use that to FILTER and REASON over programs — do not list everything.
+4. If the student asks a follow-up, continue the conversation intelligently based on prior context.
+5. Keep responses concise: 2–4 sentences or a focused list of 2–3 items maximum.
+6. If the student speaks Hindi, reply ONLY in Hindi. If English, reply ONLY in English.
+7. NEVER repeat the same response twice in a conversation.
+8. For program recommendations — use ONLY programs from this catalog. NEVER invent programs.
+9. If a user asks about ONE specific program, give details about THAT program only.
+10. If a user asks after 12th → recommend only UG/Diploma programs.
+11. For GENERAL education/career questions (e.g., "what can I do after 10th?", "which stream should I choose?") — use your general knowledge to give helpful, encouraging advice. You do NOT have to stick to the catalog for such questions.
+12. If the student is below 12th grade, guide them on what steps to take to eventually qualify for international programs. Be warm and encouraging.
 
 KEY RULES:
 ${rulesSnapshot}
 
-PROGRAM CATALOG:
+PROGRAM CATALOG (for students who are 12th pass or higher):
 ${catalogSnapshot}`;
 };
+
 
 const buildLanguageInstruction = (language: 'hi' | 'en'): string =>
   language === 'hi'
@@ -77,7 +82,7 @@ const buildLanguageInstruction = (language: 'hi' | 'en'): string =>
 
 // ─── Build Gemini API message contents ───────────────────────────────────────
 const toContents = (
-  history: Array<{role: 'user' | 'assistant'; content: string; image?: string | null}>,
+  history: Array<{ role: 'user' | 'assistant'; content: string; image?: string | null }>,
   userMessage: string,
   image?: string | null,
 ) => {
@@ -85,17 +90,17 @@ const toContents = (
     role: 'user' | 'model';
     parts: Array<{
       text?: string;
-      inlineData?: {mimeType: string; data: string};
+      inlineData?: { mimeType: string; data: string };
     }>;
   }> = history.map(message => ({
     role: message.role === 'assistant' ? 'model' : 'user',
-    parts: [{text: message.content}],
+    parts: [{ text: message.content }],
   }));
 
   const userParts: Array<{
     text?: string;
-    inlineData?: {mimeType: string; data: string};
-  }> = [{text: userMessage}];
+    inlineData?: { mimeType: string; data: string };
+  }> = [{ text: userMessage }];
 
   if (image) {
     const base64 = image.replace(/^data:image\/[a-zA-Z0-9.+-]+;base64,/, '').trim();
@@ -109,7 +114,7 @@ const toContents = (
     }
   }
 
-  contents.push({role: 'user', parts: userParts});
+  contents.push({ role: 'user', parts: userParts });
   return contents;
 };
 
@@ -139,7 +144,7 @@ const callGeminiRaw = async (payload: {
     };
 
     if (payload.systemPrompt) {
-      body.systemInstruction = {parts: [{text: payload.systemPrompt}]};
+      body.systemInstruction = { parts: [{ text: payload.systemPrompt }] };
     }
 
     if (payload.jsonMode) {
@@ -150,7 +155,7 @@ const callGeminiRaw = async (payload: {
       `${GEMINI_BASE_URL.replace(/\/+$/, '')}/models/${encodeURIComponent(GEMINI_MODEL)}:generateContent?key=${encodeURIComponent(GEMINI_API_KEY)}`,
       {
         method: 'POST',
-        headers: {'Content-Type': 'application/json'},
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
         signal: controller.signal,
       },
@@ -166,7 +171,7 @@ const callGeminiRaw = async (payload: {
 
     const reply =
       data?.candidates?.[0]?.content?.parts
-        ?.map((part: {text?: string}) => part.text || '')
+        ?.map((part: { text?: string }) => part.text || '')
         .join('')
         .trim() || '';
 
@@ -185,7 +190,7 @@ export const isDirectGeminiAvailable = (): boolean => Boolean(GEMINI_API_KEY);
 
 export const directGeminiChat = async (
   userMessage: string,
-  history: Array<{role: 'user' | 'assistant'; content: string; image?: string | null}>,
+  history: Array<{ role: 'user' | 'assistant'; content: string; image?: string | null }>,
   options?: {
     temperature?: number;
     maxOutputTokens?: number;
@@ -213,11 +218,11 @@ export const directGeminiChat = async (
 // ─── Analyze conversation intent via Gemini (port from backend) ──────────────
 export const analyzeConversation = async (
   userMessage: string,
-  history: Array<{role: 'user' | 'assistant'; content: string; image?: string | null}>,
+  history: Array<{ role: 'user' | 'assistant'; content: string; image?: string | null }>,
 ): Promise<AssistantAnalysis | null> => {
   const greetingWords = ['hi', 'hii', 'hello', 'hey', 'good morning', 'good afternoon', 'good evening'];
   if (greetingWords.includes(userMessage.trim().toLowerCase())) {
-    return {topic: 'general', confidence: 1, needsMoreInfo: false, summary: 'Greeting detected'};
+    return { topic: 'general', confidence: 1, needsMoreInfo: false, summary: 'Greeting detected' };
   }
 
   const conversationText = history
@@ -252,7 +257,7 @@ USER: ${userMessage}`;
   try {
     const raw = await callGeminiRaw({
       systemPrompt: 'You are a strict JSON analyzer. Extract ALL available student profile information from the conversation. Return valid JSON only, no extra text.',
-      contents: [{role: 'user', parts: [{text: prompt}]}],
+      contents: [{ role: 'user', parts: [{ text: prompt }] }],
       temperature: 0,
       jsonMode: true,
       maxOutputTokens: 256,
@@ -262,11 +267,11 @@ USER: ${userMessage}`;
     try {
       return JSON.parse(cleaned) as AssistantAnalysis;
     } catch {
-      return {topic: 'general', confidence: 0.5, needsMoreInfo: false, summary: 'Parse error fallback'};
+      return { topic: 'general', confidence: 0.5, needsMoreInfo: false, summary: 'Parse error fallback' };
     }
   } catch (err: any) {
     console.warn('[directGemini] analyzeConversation error:', err?.message);
-    return {topic: 'general', confidence: 0.5, needsMoreInfo: false, summary: 'Fallback: error'};
+    return { topic: 'general', confidence: 0.5, needsMoreInfo: false, summary: 'Fallback: error' };
   }
 };
 
