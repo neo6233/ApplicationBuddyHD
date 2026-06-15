@@ -119,18 +119,19 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.inputBackground,
     borderWidth: 1.5,
     borderColor: Colors.inputBorder,
-    borderRadius: 12,
+    borderRadius: 14,
     paddingHorizontal: 16,
-    minHeight: 52,
+    minHeight: 54,
   },
   inputWrapperFocused: {
     borderColor: Colors.inputFocusBorder,
+    backgroundColor: 'rgba(139, 92, 246, 0.04)',
     ...(Platform.OS === 'ios'
       ? {
           shadowColor: Colors.accent,
           shadowOffset: {width: 0, height: 0},
-          shadowOpacity: 0.15,
-          shadowRadius: 8,
+          shadowOpacity: 0.2,
+          shadowRadius: 10,
         }
       : {
           elevation: 0,

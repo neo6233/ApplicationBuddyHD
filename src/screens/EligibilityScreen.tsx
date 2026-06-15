@@ -4,7 +4,6 @@ import {
   Text,
   StyleSheet,
   ScrollView,
-  StatusBar,
 } from 'react-native';
 import {SafeAreaView} from 'react-native-safe-area-context';
 import {NativeStackNavigationProp} from '@react-navigation/native-stack';
@@ -14,6 +13,7 @@ import Strings from '../constants/Strings';
 import CustomInput from '../components/CustomInput';
 import CustomButton from '../components/CustomButton';
 import Header from '../components/Header';
+import GradientBackground from '../components/GradientBackground';
 import Loader from '../components/Loader';
 import useAppDispatch from '../redux/hooks/useAppDispatch';
 import useAppSelector from '../redux/hooks/useAppSelector';
@@ -27,9 +27,9 @@ type Props = {
 
 const CourseItem: React.FC<{course: EligibleCourse}> = ({course}) => {
   const statusConfig = {
-    eligible: {color: Colors.success, label: '✓ Eligible', bg: 'rgba(0, 229, 160, 0.1)'},
-    conditional: {color: Colors.warning, label: '⚡ Conditional', bg: 'rgba(255, 184, 48, 0.1)'},
-    not_eligible: {color: Colors.error, label: '✗ Not Eligible', bg: 'rgba(255, 77, 106, 0.1)'},
+    eligible: {color: Colors.success, label: '✓ Eligible', bg: 'rgba(52, 211, 153, 0.1)'},
+    conditional: {color: Colors.warning, label: '⚡ Conditional', bg: 'rgba(251, 191, 36, 0.1)'},
+    not_eligible: {color: Colors.error, label: '✗ Not Eligible', bg: 'rgba(251, 113, 133, 0.1)'},
   };
 
   const config = statusConfig[course.status];
@@ -97,8 +97,8 @@ const EligibilityScreen: React.FC<Props> = () => {
   };
 
   return (
-    <SafeAreaView style={styles.container}>
-      <StatusBar barStyle="light-content" backgroundColor={Colors.background} />
+    <GradientBackground>
+      <SafeAreaView style={styles.container}>
       <Header
         title={Strings.ELIGIBILITY_TITLE}
         subtitle={Strings.ELIGIBILITY_SUBTITLE}
@@ -225,14 +225,14 @@ const EligibilityScreen: React.FC<Props> = () => {
           </View>
         )}
       </ScrollView>
-    </SafeAreaView>
+      </SafeAreaView>
+    </GradientBackground>
   );
 };
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: Colors.background,
   },
   scrollContent: {
     paddingBottom: 40,
@@ -244,8 +244,8 @@ const styles = StyleSheet.create({
     marginTop: 8,
   },
   errorBanner: {
-    backgroundColor: 'rgba(255, 77, 106, 0.1)',
-    borderRadius: 10,
+    backgroundColor: 'rgba(251, 113, 133, 0.1)',
+    borderRadius: 12,
     padding: 12,
     marginBottom: 16,
     borderWidth: 1,
@@ -259,15 +259,15 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
   },
   summaryCard: {
-    backgroundColor: Colors.surface,
-    borderRadius: 14,
-    padding: 16,
+    backgroundColor: Colors.glass,
+    borderRadius: 16,
+    padding: 18,
     marginBottom: 12,
     borderWidth: 1,
-    borderColor: Colors.border,
+    borderColor: Colors.glassBorder,
   },
   summaryTitle: {
-    fontSize: 14,
+    fontSize: 15,
     fontWeight: '700',
     color: Colors.textPrimary,
     marginBottom: 8,
@@ -278,17 +278,17 @@ const styles = StyleSheet.create({
     lineHeight: 21,
   },
   recommendationsCard: {
-    backgroundColor: 'rgba(123, 97, 255, 0.08)',
-    borderRadius: 14,
-    padding: 16,
+    backgroundColor: 'rgba(139, 92, 246, 0.08)',
+    borderRadius: 16,
+    padding: 18,
     marginBottom: 12,
     borderWidth: 1,
-    borderColor: 'rgba(123, 97, 255, 0.2)',
+    borderColor: 'rgba(139, 92, 246, 0.2)',
   },
   recommendationsTitle: {
-    fontSize: 14,
+    fontSize: 15,
     fontWeight: '700',
-    color: Colors.secondary,
+    color: Colors.accent,
     marginBottom: 10,
   },
   recommendationItem: {
@@ -301,7 +301,7 @@ const styles = StyleSheet.create({
     width: 6,
     height: 6,
     borderRadius: 3,
-    backgroundColor: Colors.secondary,
+    backgroundColor: Colors.accent,
     marginTop: 7,
     flexShrink: 0,
   },
@@ -331,12 +331,12 @@ const styles = StyleSheet.create({
     color: Colors.textPrimary,
   },
   courseItem: {
-    backgroundColor: Colors.card,
-    borderRadius: 12,
-    padding: 14,
+    backgroundColor: Colors.glass,
+    borderRadius: 14,
+    padding: 16,
     marginBottom: 8,
     borderWidth: 1,
-    borderColor: Colors.border,
+    borderColor: Colors.glassBorder,
   },
   courseItemEligible: {
     borderLeftColor: Colors.success,

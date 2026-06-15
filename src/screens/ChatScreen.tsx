@@ -9,7 +9,6 @@ import {
   KeyboardAvoidingView,
   Platform,
   Alert,
-  StatusBar,
   Image,
 } from 'react-native';
 import {NativeStackNavigationProp} from '@react-navigation/native-stack';
@@ -19,6 +18,7 @@ import Strings from '../constants/Strings';
 import ChatBubble from '../components/ChatBubble';
 import {TypingIndicator} from '../components/Loader';
 import Header from '../components/Header';
+import GradientBackground from '../components/GradientBackground';
 import useAppDispatch from '../redux/hooks/useAppDispatch';
 import useAppSelector from '../redux/hooks/useAppSelector';
 import {
@@ -34,7 +34,6 @@ import {Program} from '../models/ProgramModel';
 import {captureVoiceText, isVoiceSupported, resetVoicePromise} from '../services/voiceService';
 import {pickImageFromGallery} from '../services/imagePicker';
 import {speak, stopSpeaking} from '../services/ttsService';
-import {PROGRAM_CATALOG} from '../data/programCatalog';
 
 type Props = {
   navigation: NativeStackNavigationProp<RootStackParamList, 'Chat'>;
@@ -47,7 +46,11 @@ const WelcomeMessage: React.FC<{
 }> = ({onSuggestionPress}) => (
   <View style={styles.welcomeContainer}>
     <View style={styles.welcomeIconBadge}>
-      <Text style={styles.welcomeIcon}>A</Text>
+      <Image
+        source={require('../assets/aria_logo.png')}
+        style={styles.welcomeLogoImage}
+        resizeMode="contain"
+      />
     </View>
     <Text style={styles.welcomeTitle}>Hi, I'm ARIA!</Text>
     <Text style={styles.welcomeText}>{Strings.CHAT_WELCOME}</Text>
@@ -369,8 +372,8 @@ useEffect(() => {
   );
 
   return (
-    <SafeAreaView style={styles.container}>
-      <StatusBar barStyle="light-content" backgroundColor={Colors.background} />
+    <GradientBackground>
+      <SafeAreaView style={styles.container}>
       <Header
         title={Strings.NAV_CHAT}
         subtitle="Online · AI Admission Counsellor"
@@ -501,14 +504,14 @@ useEffect(() => {
         </View>
 
       </KeyboardAvoidingView>
-    </SafeAreaView>
+      </SafeAreaView>
+    </GradientBackground>
   );
 };
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: Colors.background,
   },
   keyboardAvoid: {
     flex: 1,
@@ -527,26 +530,24 @@ const styles = StyleSheet.create({
     paddingBottom: 24,
   },
   welcomeIconBadge: {
-    width: 64,
-    height: 64,
-    borderRadius: 20,
-    backgroundColor: Colors.accent,
-    alignItems: 'center',
-    justifyContent: 'center',
+    width: 72,
+    height: 72,
+    borderRadius: 22,
+    overflow: 'hidden',
     marginBottom: 16,
     shadowColor: Colors.accent,
     shadowOffset: {width: 0, height: 4},
-    shadowOpacity: 0.4,
-    shadowRadius: 12,
-    elevation: 8,
+    shadowOpacity: 0.5,
+    shadowRadius: 16,
+    elevation: 10,
   },
-  welcomeIcon: {
-    fontSize: 34,
-    fontWeight: '800',
-    color: Colors.textInverse,
+  welcomeLogoImage: {
+    width: 72,
+    height: 72,
+    borderRadius: 22,
   },
   welcomeTitle: {
-    fontSize: 22,
+    fontSize: 24,
     fontWeight: '700',
     color: Colors.textPrimary,
     marginBottom: 10,
@@ -606,17 +607,17 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   suggestionChip: {
-    backgroundColor: Colors.surfaceElevated,
+    backgroundColor: Colors.glass,
     borderRadius: 20,
     paddingHorizontal: 16,
-    paddingVertical: 8,
+    paddingVertical: 9,
     borderWidth: 1,
-    borderColor: Colors.border,
+    borderColor: Colors.glassBorder,
   },
   suggestionText: {
     fontSize: 13,
     color: Colors.accent,
-    fontWeight: '500',
+    fontWeight: '600',
   },
   inputBar: {
     flexDirection: 'row',
@@ -662,7 +663,7 @@ const styles = StyleSheet.create({
   sendIcon: {
     fontSize: 20,
     fontWeight: '700',
-    color: Colors.textInverse,
+    color: Colors.white,
   },
   attachButton: {
     width: 44,
@@ -696,7 +697,7 @@ const styles = StyleSheet.create({
     color: Colors.textPrimary,
   },
   voiceIconActive: {
-    color: Colors.textInverse,
+    color: Colors.white,
   },
 });
 

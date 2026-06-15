@@ -6,19 +6,18 @@ import {
   ScrollView,
   TouchableOpacity,
   Alert,
-  StatusBar,
 } from 'react-native';
 import {NativeStackNavigationProp} from '@react-navigation/native-stack';
 import {RootStackParamList} from '../navigation/AppNavigator';
 import Colors from '../constants/Colors';
 import Strings from '../constants/Strings';
 import Header from '../components/Header';
+import GradientBackground from '../components/GradientBackground';
 import useAppSelector from '../redux/hooks/useAppSelector';
 import useAppDispatch from '../redux/hooks/useAppDispatch';
 import {removeSavedProgram} from '../redux/slices/programSlice';
 import {clearChatHistory} from '../redux/slices/chatSlice';
 import {Program} from '../models/ProgramModel';
-import Validators from '../utils/Validators';
 
 type Props = {
   navigation: NativeStackNavigationProp<RootStackParamList, 'Profile'>;
@@ -66,16 +65,17 @@ const ProfileScreen: React.FC<Props> = ({navigation}) => {
   };
 
   return (
-    <SafeAreaView style={styles.container}>
-      <StatusBar barStyle="light-content" backgroundColor={Colors.background} />
+    <GradientBackground>
+      <SafeAreaView style={styles.container}>
       <Header title={Strings.PROFILE_TITLE} showBack />
 
       <ScrollView
         showsVerticalScrollIndicator={false}
         contentContainerStyle={styles.scrollContent}>
 
-        {/* Profile Card */}
+        {/* Profile Card — Glass effect */}
         <View style={styles.profileCard}>
+          <View style={styles.profileCardGlow} />
           <View style={styles.avatarLarge}>
             <Text style={styles.avatarInitial}>
               {userName.charAt(0).toUpperCase()}
@@ -94,7 +94,7 @@ const ProfileScreen: React.FC<Props> = ({navigation}) => {
             <Text style={styles.statDesc}>{Strings.PROFILE_TOTAL_CHATS}</Text>
           </View>
           <View style={styles.statCard}>
-            <Text style={styles.statNum}>{savedPrograms.length}</Text>
+            <Text style={[styles.statNum, styles.statNumSecondary]}>{savedPrograms.length}</Text>
             <Text style={styles.statDesc}>{Strings.PROFILE_SAVED_PROGRAMS}</Text>
           </View>
         </View>
@@ -188,14 +188,14 @@ const ProfileScreen: React.FC<Props> = ({navigation}) => {
         )}
 
       </ScrollView>
-    </SafeAreaView>
+      </SafeAreaView>
+    </GradientBackground>
   );
 };
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: Colors.background,
   },
   scrollContent: {
     padding: 20,
@@ -204,26 +204,42 @@ const styles = StyleSheet.create({
   profileCard: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: Colors.surface,
-    borderRadius: 16,
+    backgroundColor: Colors.glass,
+    borderRadius: 18,
     padding: 20,
     borderWidth: 1,
-    borderColor: Colors.border,
+    borderColor: Colors.glassBorder,
     marginBottom: 16,
     gap: 16,
+    overflow: 'hidden',
+    position: 'relative',
+  },
+  profileCardGlow: {
+    position: 'absolute',
+    top: -30,
+    left: -30,
+    width: 100,
+    height: 100,
+    borderRadius: 50,
+    backgroundColor: 'rgba(139, 92, 246, 0.1)',
   },
   avatarLarge: {
-    width: 60,
-    height: 60,
+    width: 64,
+    height: 64,
     borderRadius: 20,
     backgroundColor: Colors.accent,
     alignItems: 'center',
     justifyContent: 'center',
+    shadowColor: Colors.accent,
+    shadowOffset: {width: 0, height: 4},
+    shadowOpacity: 0.4,
+    shadowRadius: 12,
+    elevation: 6,
   },
   avatarInitial: {
     fontSize: 28,
     fontWeight: '800',
-    color: Colors.textInverse,
+    color: Colors.white,
   },
   profileDetails: {
     flex: 1,
@@ -245,24 +261,28 @@ const styles = StyleSheet.create({
   },
   statCard: {
     flex: 1,
-    backgroundColor: Colors.surface,
-    borderRadius: 14,
-    padding: 18,
+    backgroundColor: Colors.glass,
+    borderRadius: 16,
+    padding: 20,
     alignItems: 'center',
     borderWidth: 1,
-    borderColor: Colors.border,
+    borderColor: Colors.glassBorder,
   },
   statNum: {
-    fontSize: 28,
+    fontSize: 30,
     fontWeight: '800',
     color: Colors.accent,
     marginBottom: 4,
+  },
+  statNumSecondary: {
+    color: Colors.secondary,
   },
   statDesc: {
     fontSize: 12,
     color: Colors.textMuted,
     textAlign: 'center',
     letterSpacing: 0.3,
+    fontWeight: '500',
   },
   section: {
     marginBottom: 24,
@@ -270,23 +290,23 @@ const styles = StyleSheet.create({
   sectionTitle: {
     fontSize: 12,
     fontWeight: '700',
-    color: Colors.textMuted,
+    color: Colors.white,
     letterSpacing: 1,
     textTransform: 'uppercase',
     marginBottom: 12,
   },
   actionsCard: {
-    backgroundColor: Colors.surface,
-    borderRadius: 14,
+    backgroundColor: Colors.glass,
+    borderRadius: 16,
     borderWidth: 1,
-    borderColor: Colors.border,
+    borderColor: Colors.glassBorder,
     overflow: 'hidden',
   },
   actionRow: {
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: 18,
-    paddingVertical: 15,
+    paddingVertical: 16,
     gap: 12,
   },
   actionIcon: {
@@ -308,15 +328,15 @@ const styles = StyleSheet.create({
     marginHorizontal: 18,
   },
   emptyState: {
-    backgroundColor: Colors.surface,
-    borderRadius: 14,
-    padding: 28,
+    backgroundColor: Colors.glass,
+    borderRadius: 16,
+    padding: 32,
     alignItems: 'center',
     borderWidth: 1,
-    borderColor: Colors.border,
+    borderColor: Colors.glassBorder,
   },
   emptyIcon: {
-    fontSize: 32,
+    fontSize: 36,
     marginBottom: 12,
   },
   emptyText: {
@@ -329,13 +349,13 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   savedCard: {
-    backgroundColor: Colors.card,
-    borderRadius: 12,
-    padding: 14,
+    backgroundColor: Colors.glass,
+    borderRadius: 14,
+    padding: 16,
     flexDirection: 'row',
     alignItems: 'flex-start',
     borderWidth: 1,
-    borderColor: Colors.border,
+    borderColor: Colors.glassBorder,
     gap: 10,
   },
   savedCardLeft: {
@@ -358,21 +378,26 @@ const styles = StyleSheet.create({
   },
   savedTag: {
     backgroundColor: Colors.surfaceElevated,
-    borderRadius: 6,
-    paddingHorizontal: 8,
-    paddingVertical: 3,
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderWidth: 1,
+    borderColor: Colors.border,
   },
   savedTagText: {
     fontSize: 11,
     color: Colors.textMuted,
+    fontWeight: '500',
   },
   removeButton: {
-    width: 28,
-    height: 28,
-    borderRadius: 8,
-    backgroundColor: 'rgba(255, 77, 106, 0.1)',
+    width: 30,
+    height: 30,
+    borderRadius: 10,
+    backgroundColor: 'rgba(251, 113, 133, 0.1)',
     alignItems: 'center',
     justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(251, 113, 133, 0.2)',
   },
   removeIcon: {
     fontSize: 12,
@@ -380,12 +405,12 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   dangerButton: {
-    backgroundColor: 'rgba(255, 77, 106, 0.1)',
-    borderRadius: 12,
+    backgroundColor: 'rgba(251, 113, 133, 0.08)',
+    borderRadius: 14,
     padding: 16,
     alignItems: 'center',
     borderWidth: 1,
-    borderColor: 'rgba(255, 77, 106, 0.3)',
+    borderColor: 'rgba(251, 113, 133, 0.25)',
   },
   dangerButtonText: {
     fontSize: 14,

@@ -1,18 +1,20 @@
-import React from 'react';
+import React, {useEffect, useRef} from 'react';
 import {
   View,
   Text,
   StyleSheet,
   ScrollView,
   TouchableOpacity,
-  StatusBar,
   Dimensions,
+  Image,
+  Animated,
 } from 'react-native';
 import {NativeStackNavigationProp} from '@react-navigation/native-stack';
 import {RootStackParamList} from '../navigation/AppNavigator';
 import Colors from '../constants/Colors';
 import Strings from '../constants/Strings';
 import useAppSelector from '../redux/hooks/useAppSelector';
+import GradientBackground from '../components/GradientBackground';
 
 const {width} = Dimensions.get('window');
 const CARD_WIDTH = (width - 48) / 2;
@@ -27,6 +29,7 @@ interface FeatureCard {
   description: string;
   route: keyof RootStackParamList;
   accentColor: string;
+  glowColor: string;
 }
 
 const FEATURE_CARDS: FeatureCard[] = [
@@ -35,28 +38,32 @@ const FEATURE_CARDS: FeatureCard[] = [
     title: Strings.HOME_CARD_AI,
     description: Strings.HOME_CARD_AI_DESC,
     route: 'Chat',
-    accentColor: Colors.accent,
+    accentColor: Colors.cardAIAssistant,
+    glowColor: 'rgba(139, 92, 246, 0.15)',
   },
   {
     emoji: '🎓',
     title: Strings.HOME_CARD_PROGRAMS,
     description: Strings.HOME_CARD_PROGRAMS_DESC,
     route: 'ProgramFinder',
-    accentColor: Colors.secondary,
+    accentColor: Colors.cardProgramFinder,
+    glowColor: 'rgba(59, 130, 246, 0.15)',
   },
   {
     emoji: '✅',
     title: Strings.HOME_CARD_ELIGIBILITY,
     description: Strings.HOME_CARD_ELIGIBILITY_DESC,
     route: 'Eligibility',
-    accentColor: Colors.success,
+    accentColor: Colors.cardEligibility,
+    glowColor: 'rgba(52, 211, 153, 0.15)',
   },
   {
     emoji: '👤',
     title: Strings.HOME_CARD_PROFILE,
     description: Strings.HOME_CARD_PROFILE_DESC,
     route: 'Profile',
-    accentColor: Colors.warning,
+    accentColor: Colors.cardProfile,
+    glowColor: 'rgba(245, 158, 11, 0.15)',
   },
 ];
 
@@ -64,26 +71,52 @@ const HomeScreen: React.FC<Props> = ({navigation}) => {
   const totalChats = useAppSelector(s => s.chat.totalChats);
   const savedPrograms = useAppSelector(s => s.programs.savedPrograms.length);
 
+  const fadeIn = useRef(new Animated.Value(0)).current;
+  const slideUp = useRef(new Animated.Value(20)).current;
+
+  useEffect(() => {
+    Animated.parallel([
+      Animated.timing(fadeIn, {
+        toValue: 1,
+        duration: 500,
+        useNativeDriver: true,
+      }),
+      Animated.timing(slideUp, {
+        toValue: 0,
+        duration: 500,
+        useNativeDriver: true,
+      }),
+    ]).start();
+  }, [fadeIn, slideUp]);
+
   return (
-    <View style={styles.container}>
-      <StatusBar barStyle="light-content" backgroundColor={Colors.background} />
+    <GradientBackground style={styles.container}>
       <ScrollView
         showsVerticalScrollIndicator={false}
         contentContainerStyle={styles.scrollContent}>
 
         {/* Header */}
-        <View style={styles.header}>
+        <Animated.View
+          style={[
+            styles.header,
+            {opacity: fadeIn, transform: [{translateY: slideUp}]},
+          ]}>
           <View style={styles.headerLeft}>
             <Text style={styles.greeting}>{Strings.HOME_GREETING}</Text>
             <Text style={styles.subtitle}>{Strings.HOME_SUBTITLE}</Text>
           </View>
           <View style={styles.logoBadge}>
-            <Text style={styles.logoLetter}>A</Text>
+            <Image
+              source={require('../assets/aria_logo.png')}
+              style={styles.logoImage}
+              resizeMode="contain"
+            />
           </View>
-        </View>
+        </Animated.View>
 
-        {/* Stats Bar */}
+        {/* Stats Bar — Glass effect */}
         <View style={styles.statsBar}>
+          <View style={styles.statsGlassHighlight} />
           <View style={styles.statItem}>
             <Text style={styles.statValue}>{totalChats}</Text>
             <Text style={styles.statLabel}>Chats</Text>
@@ -95,7 +128,7 @@ const HomeScreen: React.FC<Props> = ({navigation}) => {
           </View>
           <View style={styles.statDivider} />
           <View style={styles.statItem}>
-            <Text style={styles.statValue}>AI</Text>
+            <Text style={[styles.statValue, styles.statValueSecondary]}>AI</Text>
             <Text style={styles.statLabel}>Powered</Text>
           </View>
         </View>
@@ -109,10 +142,17 @@ const HomeScreen: React.FC<Props> = ({navigation}) => {
               style={styles.card}
               onPress={() => navigation.navigate(card.route)}
               activeOpacity={0.8}>
-              {/* Accent glow */}
+              {/* Accent glow — larger, more visible */}
               <View
                 style={[
                   styles.cardAccentGlow,
+                  {backgroundColor: card.glowColor},
+                ]}
+              />
+              {/* Glass border top highlight */}
+              <View
+                style={[
+                  styles.cardTopBorder,
                   {backgroundColor: card.accentColor},
                 ]}
               />
@@ -128,11 +168,12 @@ const HomeScreen: React.FC<Props> = ({navigation}) => {
           ))}
         </View>
 
-        {/* CTA Banner */}
+        {/* CTA Banner — Gradient style */}
         <TouchableOpacity
           style={styles.ctaBanner}
           onPress={() => navigation.navigate('Chat')}
           activeOpacity={0.85}>
+          <View style={styles.ctaBannerGlow} />
           <View style={styles.ctaLeft}>
             <Text style={styles.ctaTitle}>Chat with ARIA</Text>
             <Text style={styles.ctaSubtitle}>
@@ -145,14 +186,13 @@ const HomeScreen: React.FC<Props> = ({navigation}) => {
         </TouchableOpacity>
 
       </ScrollView>
-    </View>
+    </GradientBackground>
   );
 };
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: Colors.background,
   },
   scrollContent: {
     paddingBottom: 32,
@@ -169,10 +209,10 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   greeting: {
-    fontSize: 26,
+    fontSize: 28,
     fontWeight: '800',
     color: Colors.textPrimary,
-    letterSpacing: 0.2,
+    letterSpacing: 0.3,
   },
   subtitle: {
     fontSize: 14,
@@ -180,59 +220,71 @@ const styles = StyleSheet.create({
     marginTop: 4,
   },
   logoBadge: {
-    width: 44,
-    height: 44,
-    borderRadius: 14,
-    backgroundColor: Colors.accent,
-    alignItems: 'center',
-    justifyContent: 'center',
+    width: 50,
+    height: 50,
+    borderRadius: 16,
+    overflow: 'hidden',
     shadowColor: Colors.accent,
     shadowOffset: {width: 0, height: 4},
-    shadowOpacity: 0.4,
-    shadowRadius: 10,
-    elevation: 6,
+    shadowOpacity: 0.5,
+    shadowRadius: 12,
+    elevation: 8,
   },
-  logoLetter: {
-    fontSize: 22,
-    fontWeight: '800',
-    color: Colors.textInverse,
+  logoImage: {
+    width: 50,
+    height: 50,
+    borderRadius: 16,
   },
   statsBar: {
     flexDirection: 'row',
     alignItems: 'center',
     marginHorizontal: 20,
-    backgroundColor: Colors.surface,
-    borderRadius: 14,
-    paddingVertical: 16,
+    backgroundColor: Colors.glass,
+    borderRadius: 16,
+    paddingVertical: 18,
     paddingHorizontal: 20,
     borderWidth: 1,
-    borderColor: Colors.border,
+    borderColor: Colors.glassBorder,
     marginBottom: 28,
+    overflow: 'hidden',
+    position: 'relative',
+  },
+  statsGlassHighlight: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    height: 1,
+    backgroundColor: Colors.glassHighlight,
   },
   statItem: {
     flex: 1,
     alignItems: 'center',
   },
   statValue: {
-    fontSize: 20,
-    fontWeight: '700',
+    fontSize: 22,
+    fontWeight: '800',
     color: Colors.accent,
+  },
+  statValueSecondary: {
+    color: Colors.secondary,
   },
   statLabel: {
     fontSize: 11,
     color: Colors.textMuted,
-    marginTop: 2,
-    letterSpacing: 0.3,
+    marginTop: 3,
+    letterSpacing: 0.4,
+    fontWeight: '500',
   },
   statDivider: {
     width: 1,
-    height: 32,
+    height: 36,
     backgroundColor: Colors.border,
   },
   sectionTitle: {
     fontSize: 13,
     fontWeight: '700',
-    color: Colors.textMuted,
+    color: Colors.white,
     letterSpacing: 1.2,
     textTransform: 'uppercase',
     paddingHorizontal: 20,
@@ -247,26 +299,35 @@ const styles = StyleSheet.create({
   },
   card: {
     width: CARD_WIDTH,
-    backgroundColor: Colors.card,
-    borderRadius: 18,
+    backgroundColor: Colors.glass,
+    borderRadius: 20,
     padding: 18,
     borderWidth: 1,
-    borderColor: Colors.border,
+    borderColor: Colors.glassBorder,
     overflow: 'hidden',
     position: 'relative',
   },
   cardAccentGlow: {
     position: 'absolute',
-    top: -20,
-    right: -20,
-    width: 60,
-    height: 60,
-    borderRadius: 30,
-    opacity: 0.08,
+    top: -30,
+    right: -30,
+    width: 90,
+    height: 90,
+    borderRadius: 45,
+  },
+  cardTopBorder: {
+    position: 'absolute',
+    top: 0,
+    left: 20,
+    right: 20,
+    height: 2,
+    borderRadius: 1,
+    opacity: 0.5,
   },
   cardEmoji: {
-    fontSize: 28,
-    marginBottom: 12,
+    fontSize: 30,
+    marginBottom: 14,
+    marginTop: 4,
   },
   cardTitle: {
     fontSize: 15,
@@ -278,12 +339,12 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: Colors.textMuted,
     lineHeight: 17,
-    marginBottom: 14,
+    marginBottom: 16,
   },
   cardChevron: {
-    width: 28,
-    height: 28,
-    borderRadius: 8,
+    width: 30,
+    height: 30,
+    borderRadius: 10,
     borderWidth: 1.5,
     alignItems: 'center',
     justifyContent: 'center',
@@ -294,20 +355,31 @@ const styles = StyleSheet.create({
   },
   ctaBanner: {
     marginHorizontal: 16,
-    backgroundColor: Colors.surface,
-    borderRadius: 16,
+    backgroundColor: Colors.glass,
+    borderRadius: 18,
     padding: 20,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     borderWidth: 1,
-    borderColor: Colors.accent,
+    borderColor: Colors.glassBorder,
+    overflow: 'hidden',
+    position: 'relative',
+  },
+  ctaBannerGlow: {
+    position: 'absolute',
+    top: -40,
+    left: -20,
+    width: 120,
+    height: 120,
+    borderRadius: 60,
+    backgroundColor: 'rgba(139, 92, 246, 0.08)',
   },
   ctaLeft: {
     flex: 1,
   },
   ctaTitle: {
-    fontSize: 16,
+    fontSize: 17,
     fontWeight: '700',
     color: Colors.textPrimary,
     marginBottom: 4,
@@ -317,12 +389,14 @@ const styles = StyleSheet.create({
     color: Colors.textSecondary,
   },
   ctaIcon: {
-    width: 44,
-    height: 44,
-    borderRadius: 12,
-    backgroundColor: Colors.white10,
+    width: 48,
+    height: 48,
+    borderRadius: 14,
+    backgroundColor: 'rgba(139, 92, 246, 0.15)',
     alignItems: 'center',
     justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: Colors.glassBorder,
   },
   ctaIconText: {
     fontSize: 22,

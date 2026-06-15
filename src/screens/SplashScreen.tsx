@@ -4,8 +4,8 @@ import {
   Text,
   StyleSheet,
   Animated,
-  StatusBar,
   Dimensions,
+  Image,
 } from 'react-native';
 import {NativeStackNavigationProp} from '@react-navigation/native-stack';
 import {RootStackParamList} from '../navigation/AppNavigator';
@@ -15,6 +15,7 @@ import {loadSavedPrograms} from '../redux/slices/programSlice';
 import useAppDispatch from '../redux/hooks/useAppDispatch';
 import {resolveReachableServiceUrl} from '../config/serviceUrl';
 import {setApiBaseURL} from '../services/ApiClient';
+import GradientBackground from '../components/GradientBackground';
 
 const {width} = Dimensions.get('window');
 
@@ -25,15 +26,20 @@ type Props = {
 const SplashScreen: React.FC<Props> = ({navigation}) => {
   const dispatch = useAppDispatch();
 
-  const logoScale = useRef(new Animated.Value(0.4)).current;
+  const logoScale = useRef(new Animated.Value(0.3)).current;
   const logoOpacity = useRef(new Animated.Value(0)).current;
   const taglineOpacity = useRef(new Animated.Value(0)).current;
-  const taglineTranslate = useRef(new Animated.Value(20)).current;
+  const taglineTranslate = useRef(new Animated.Value(30)).current;
   const accentOpacity = useRef(new Animated.Value(0)).current;
-  const ringScale1 = useRef(new Animated.Value(0.5)).current;
-  const ringScale2 = useRef(new Animated.Value(0.5)).current;
+  const ringScale1 = useRef(new Animated.Value(0.3)).current;
+  const ringScale2 = useRef(new Animated.Value(0.3)).current;
+  const ringScale3 = useRef(new Animated.Value(0.3)).current;
   const ringOpacity1 = useRef(new Animated.Value(0)).current;
   const ringOpacity2 = useRef(new Animated.Value(0)).current;
+  const ringOpacity3 = useRef(new Animated.Value(0)).current;
+  const glowPulse = useRef(new Animated.Value(0.4)).current;
+  const nameOpacity = useRef(new Animated.Value(0)).current;
+  const nameTranslate = useRef(new Animated.Value(15)).current;
 
   useEffect(() => {
     let active = true;
@@ -56,42 +62,87 @@ const SplashScreen: React.FC<Props> = ({navigation}) => {
       }
     })();
 
-    // Animation sequence
-    Animated.sequence([
-      // Rings expand
-      Animated.parallel([
-        Animated.timing(ringScale1, {
-          toValue: 1,
-          duration: 800,
+    // Pulsing glow loop
+    Animated.loop(
+      Animated.sequence([
+        Animated.timing(glowPulse, {
+          toValue: 0.8,
+          duration: 1200,
           useNativeDriver: true,
         }),
-        Animated.timing(ringOpacity1, {
-          toValue: 0.15,
-          duration: 800,
+        Animated.timing(glowPulse, {
+          toValue: 0.3,
+          duration: 1200,
           useNativeDriver: true,
         }),
       ]),
+    ).start();
+
+    // Animation sequence
+    Animated.sequence([
+      // Rings expand with stagger
+      Animated.stagger(200, [
+        Animated.parallel([
+          Animated.timing(ringScale1, {
+            toValue: 1,
+            duration: 700,
+            useNativeDriver: true,
+          }),
+          Animated.timing(ringOpacity1, {
+            toValue: 0.2,
+            duration: 700,
+            useNativeDriver: true,
+          }),
+        ]),
+        Animated.parallel([
+          Animated.timing(ringScale2, {
+            toValue: 1,
+            duration: 700,
+            useNativeDriver: true,
+          }),
+          Animated.timing(ringOpacity2, {
+            toValue: 0.12,
+            duration: 700,
+            useNativeDriver: true,
+          }),
+        ]),
+        Animated.parallel([
+          Animated.timing(ringScale3, {
+            toValue: 1,
+            duration: 700,
+            useNativeDriver: true,
+          }),
+          Animated.timing(ringOpacity3, {
+            toValue: 0.06,
+            duration: 700,
+            useNativeDriver: true,
+          }),
+        ]),
+      ]),
+      // Logo appears with spring
       Animated.parallel([
-        Animated.timing(ringScale2, {
-          toValue: 1,
-          duration: 600,
-          useNativeDriver: true,
-        }),
-        Animated.timing(ringOpacity2, {
-          toValue: 0.1,
-          duration: 600,
-          useNativeDriver: true,
-        }),
-        // Logo appears
         Animated.spring(logoScale, {
           toValue: 1,
-          tension: 60,
-          friction: 8,
+          tension: 50,
+          friction: 7,
           useNativeDriver: true,
         }),
         Animated.timing(logoOpacity, {
           toValue: 1,
           duration: 500,
+          useNativeDriver: true,
+        }),
+      ]),
+      // App name slides up
+      Animated.parallel([
+        Animated.timing(nameOpacity, {
+          toValue: 1,
+          duration: 350,
+          useNativeDriver: true,
+        }),
+        Animated.timing(nameTranslate, {
+          toValue: 0,
+          duration: 350,
           useNativeDriver: true,
         }),
       ]),
@@ -118,19 +169,22 @@ const SplashScreen: React.FC<Props> = ({navigation}) => {
     // Navigate after delay
     const timer = setTimeout(() => {
       navigation.replace('Home');
-    }, 3000);
+    }, 3200);
 
     return () => {
       active = false;
       clearTimeout(timer);
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   return (
-    <View style={styles.container}>
-      <StatusBar barStyle="light-content" backgroundColor={Colors.background} />
+    <GradientBackground style={styles.container}>
 
-      {/* Background rings */}
+      {/* Ambient glow behind logo */}
+      <Animated.View style={[styles.ambientGlow, {opacity: glowPulse}]} />
+
+      {/* Background rings — violet themed */}
       <Animated.View
         style={[
           styles.ring,
@@ -145,6 +199,13 @@ const SplashScreen: React.FC<Props> = ({navigation}) => {
           {transform: [{scale: ringScale2}], opacity: ringOpacity2},
         ]}
       />
+      <Animated.View
+        style={[
+          styles.ring,
+          styles.ring3,
+          {transform: [{scale: ringScale3}], opacity: ringOpacity3},
+        ]}
+      />
 
       {/* Logo area */}
       <Animated.View
@@ -152,9 +213,21 @@ const SplashScreen: React.FC<Props> = ({navigation}) => {
           styles.logoContainer,
           {transform: [{scale: logoScale}], opacity: logoOpacity},
         ]}>
-        <View style={styles.logoBadge}>
-          <Text style={styles.logoLetter}>A</Text>
+        <View style={styles.logoGlowWrap}>
+          <Image
+            source={require('../assets/aria_logo.png')}
+            style={styles.logoImage}
+            resizeMode="contain"
+          />
         </View>
+      </Animated.View>
+
+      {/* App Name */}
+      <Animated.View
+        style={{
+          opacity: nameOpacity,
+          transform: [{translateY: nameTranslate}],
+        }}>
         <Text style={styles.logoText}>ARIA</Text>
       </Animated.View>
 
@@ -171,70 +244,78 @@ const SplashScreen: React.FC<Props> = ({navigation}) => {
       {/* Bottom accent */}
       <Animated.View style={[styles.bottomBar, {opacity: accentOpacity}]}>
         <View style={styles.accentDot} />
-        <Text style={styles.bottomText}>Powered by Ollama AI</Text>
-        <View style={styles.accentDot} />
+        <Text style={styles.bottomText}>Powered by AI</Text>
+        <View style={[styles.accentDot, styles.accentDotSecondary]} />
       </Animated.View>
-    </View>
+    </GradientBackground>
   );
 };
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: Colors.background,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  ambientGlow: {
+    position: 'absolute',
+    width: width * 0.7,
+    height: width * 0.7,
+    borderRadius: width * 0.35,
+    backgroundColor: Colors.accent,
+    opacity: 0.06,
   },
   ring: {
     position: 'absolute',
     borderRadius: 9999,
-    borderWidth: 1.5,
-    borderColor: Colors.accent,
+    borderWidth: 1,
   },
   ring1: {
-    width: width * 0.75,
-    height: width * 0.75,
+    width: width * 0.6,
+    height: width * 0.6,
+    borderColor: Colors.accent,
   },
   ring2: {
-    width: width * 1.1,
-    height: width * 1.1,
+    width: width * 0.85,
+    height: width * 0.85,
+    borderColor: Colors.accentLight,
+  },
+  ring3: {
+    width: width * 1.15,
+    height: width * 1.15,
+    borderColor: Colors.secondary,
   },
   logoContainer: {
     alignItems: 'center',
-    marginBottom: 24,
-  },
-  logoBadge: {
-    width: 80,
-    height: 80,
-    borderRadius: 24,
-    backgroundColor: Colors.accent,
-    alignItems: 'center',
-    justifyContent: 'center',
     marginBottom: 16,
+  },
+  logoGlowWrap: {
+    borderRadius: 32,
     shadowColor: Colors.accent,
     shadowOffset: {width: 0, height: 0},
-    shadowOpacity: 0.5,
-    shadowRadius: 20,
-    elevation: 10,
+    shadowOpacity: 0.6,
+    shadowRadius: 30,
+    elevation: 15,
   },
-  logoLetter: {
-    fontSize: 44,
-    fontWeight: '800',
-    color: Colors.textInverse,
-    letterSpacing: -1,
+  logoImage: {
+    width: 100,
+    height: 100,
+    borderRadius: 28,
   },
   logoText: {
-    fontSize: 36,
-    fontWeight: '800',
+    fontSize: 40,
+    fontWeight: '900',
     color: Colors.textPrimary,
-    letterSpacing: 6,
+    letterSpacing: 8,
+    marginBottom: 12,
+    textAlign: 'center',
   },
   tagline: {
     fontSize: 15,
     color: Colors.textSecondary,
     textAlign: 'center',
     lineHeight: 22,
-    letterSpacing: 0.3,
+    letterSpacing: 0.5,
   },
   bottomBar: {
     position: 'absolute',
@@ -244,15 +325,19 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   accentDot: {
-    width: 4,
-    height: 4,
-    borderRadius: 2,
+    width: 5,
+    height: 5,
+    borderRadius: 2.5,
     backgroundColor: Colors.accent,
+  },
+  accentDotSecondary: {
+    backgroundColor: Colors.secondary,
   },
   bottomText: {
     fontSize: 12,
     color: Colors.textMuted,
-    letterSpacing: 0.5,
+    letterSpacing: 0.8,
+    textTransform: 'uppercase',
   },
 });
 

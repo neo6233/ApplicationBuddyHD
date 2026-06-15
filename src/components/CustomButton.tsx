@@ -69,7 +69,7 @@ const CustomButton: React.FC<CustomButtonProps> = ({
       activeOpacity={0.8}>
       {loading ? (
         <ActivityIndicator
-          color={variant === 'outline' ? Colors.accent : Colors.textInverse}
+          color={variant === 'outline' ? Colors.accent : Colors.white}
           size="small"
         />
       ) : (
@@ -88,16 +88,26 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: 24,
-    paddingVertical: 14,
-    borderRadius: 12,
+    paddingVertical: 15,
+    borderRadius: 14,
     gap: 8,
-    minHeight: 52,
+    minHeight: 54,
   },
   primary: {
     backgroundColor: Colors.accent,
+    shadowColor: Colors.accent,
+    shadowOffset: {width: 0, height: 4},
+    shadowOpacity: 0.35,
+    shadowRadius: 10,
+    elevation: 6,
   },
   secondary: {
     backgroundColor: Colors.secondary,
+    shadowColor: Colors.secondary,
+    shadowOffset: {width: 0, height: 4},
+    shadowOpacity: 0.3,
+    shadowRadius: 10,
+    elevation: 6,
   },
   outline: {
     backgroundColor: Colors.transparent,
@@ -109,8 +119,8 @@ const styles = StyleSheet.create({
   },
   text: {
     fontSize: 16,
-    fontWeight: '600',
-    color: Colors.textInverse,
+    fontWeight: '700',
+    color: Colors.white,
     letterSpacing: 0.3,
   },
 });

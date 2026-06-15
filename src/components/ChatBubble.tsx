@@ -37,7 +37,7 @@ const ChatBubble: React.FC<ChatBubbleProps> = ({message, onSaveProgram, isProgra
           parts.push(trimmedLine.substring(lastIndex, match.index));
         }
         parts.push(
-          <Text key={match.index} style={styles.boldText}>
+          <Text key={match.index} style={[styles.boldText, isUser ? styles.userBoldText : styles.aiBoldText]}>
             {match[1]}
           </Text>,
         );
@@ -51,14 +51,14 @@ const ChatBubble: React.FC<ChatBubbleProps> = ({message, onSaveProgram, isProgra
       if (trimmedLine.startsWith('*')) {
         return (
           <View key={index} style={styles.listItem}>
-            <Text style={styles.bullet}>•</Text>
-            <Text style={styles.messageText}>{parts}</Text>
+            <Text style={[styles.bullet, isUser ? styles.userBullet : styles.aiBulletText]}>•</Text>
+            <Text style={[styles.messageText, isUser ? styles.userText : styles.aiText]}>{parts}</Text>
           </View>
         );
       }
 
       return (
-        <Text key={index} style={styles.messageText}>
+        <Text key={index} style={[styles.messageText, isUser ? styles.userText : styles.aiText]}>
           {parts}
         </Text>
       );
@@ -73,7 +73,11 @@ const ChatBubble: React.FC<ChatBubbleProps> = ({message, onSaveProgram, isProgra
       ]}>
       {!isUser && (
         <View style={styles.avatarContainer}>
-          <Text style={styles.avatarText}>A</Text>
+          <Image
+            source={require('../assets/aria_logo.png')}
+            style={styles.avatarImage}
+            resizeMode="cover"
+          />
         </View>
       )}
       <View style={styles.bubbleColumn}>
@@ -149,22 +153,24 @@ const styles = StyleSheet.create({
     width: 32,
     height: 32,
     borderRadius: 16,
-    backgroundColor: Colors.accent,
-    alignItems: 'center',
-    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(139, 92, 246, 0.3)',
+    overflow: 'hidden',
     marginBottom: 18,
     flexShrink: 0,
+    backgroundColor: Colors.primaryLight,
   },
-  avatarText: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: Colors.textInverse,
+  avatarImage: {
+    width: '100%',
+    height: '100%',
   },
   userAvatarContainer: {
     width: 32,
     height: 32,
     borderRadius: 16,
-    backgroundColor: Colors.secondary,
+    backgroundColor: Colors.primaryLight,
+    borderWidth: 1,
+    borderColor: 'rgba(245, 158, 11, 0.4)',
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 18,
@@ -173,7 +179,7 @@ const styles = StyleSheet.create({
   userAvatarText: {
     fontSize: 14,
     fontWeight: '700',
-    color: Colors.white,
+    color: Colors.secondary,
   },
   bubbleColumn: {
     maxWidth: '75%',
@@ -184,14 +190,19 @@ const styles = StyleSheet.create({
     borderRadius: 18,
   },
   userBubble: {
-    backgroundColor: Colors.bubbleUser,
+    backgroundColor: Colors.accent,
     borderBottomRightRadius: 4,
+    shadowColor: Colors.accent,
+    shadowOffset: {width: 0, height: 2},
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+    elevation: 2,
   },
   aiBubble: {
     backgroundColor: Colors.bubbleAI,
     borderBottomLeftRadius: 4,
     borderWidth: 1,
-    borderColor: Colors.border,
+    borderColor: 'rgba(139, 92, 246, 0.15)',
   },
   attachedImage: {
     width: '100%',
@@ -205,35 +216,47 @@ const styles = StyleSheet.create({
     fontWeight: '400',
   },
   userText: {
-    color: Colors.bubbleUserText,
+    color: '#FFFFFF',
   },
   aiText: {
-    color: Colors.bubbleAIText,
+    color: '#E2E8F0',
   },
   saveProgramButton: {
     alignSelf: 'flex-start',
     marginTop: 12,
-    paddingHorizontal: 14,
+    paddingHorizontal: 16,
     paddingVertical: 8,
-    borderRadius: 999,
+    borderRadius: 20,
     backgroundColor: Colors.accent,
+    shadowColor: Colors.accent,
+    shadowOffset: {width: 0, height: 2},
+    shadowOpacity: 0.3,
+    shadowRadius: 4,
+    elevation: 3,
   },
   saveProgramButtonSaved: {
-    backgroundColor: Colors.surfaceElevated,
+    backgroundColor: 'rgba(255, 255, 255, 0.05)',
     borderWidth: 1,
-    borderColor: Colors.border,
+    borderColor: 'rgba(167, 139, 250, 0.25)',
+    shadowOpacity: 0,
+    elevation: 0,
   },
   saveProgramButtonText: {
     fontSize: 12,
     fontWeight: '700',
-    color: Colors.textInverse,
+    color: '#FFFFFF',
   },
   saveProgramButtonTextSaved: {
-    color: Colors.accent,
+    color: Colors.accentLight,
   },
   boldText: {
     fontWeight: '700',
-    color: Colors.bubbleAIText,
+  },
+  userBoldText: {
+    color: '#FFFFFF',
+  },
+  aiBoldText: {
+    color: '#F8FAFC',
   },
   listItem: {
     flexDirection: 'row',
@@ -243,8 +266,13 @@ const styles = StyleSheet.create({
   bullet: {
     width: 16,
     fontSize: 15,
-    color: Colors.bubbleAIText,
     lineHeight: 22,
+  },
+  userBullet: {
+    color: '#FFFFFF',
+  },
+  aiBulletText: {
+    color: '#CBD5E1',
   },
   timestamp: {
     fontSize: 11,

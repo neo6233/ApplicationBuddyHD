@@ -6,9 +6,6 @@ import {
   ScrollView,
   TouchableOpacity,
   Alert,
-  StatusBar,
-  KeyboardAvoidingView,
-  Platform,
 } from 'react-native';
 import {SafeAreaView} from 'react-native-safe-area-context';
 import {NativeStackNavigationProp} from '@react-navigation/native-stack';
@@ -18,6 +15,7 @@ import Strings from '../constants/Strings';
 import CustomInput from '../components/CustomInput';
 import CustomButton from '../components/CustomButton';
 import Header from '../components/Header';
+import GradientBackground from '../components/GradientBackground';
 import Loader from '../components/Loader';
 import useAppDispatch from '../redux/hooks/useAppDispatch';
 import useAppSelector from '../redux/hooks/useAppSelector';
@@ -150,8 +148,8 @@ const ProgramFinderScreen: React.FC<Props> = () => {
   };
 
   return (
-    <SafeAreaView style={styles.container}>
-      <StatusBar barStyle="light-content" backgroundColor={Colors.background} />
+    <GradientBackground>
+      <SafeAreaView style={styles.container}>
       <Header
         title={Strings.PROGRAM_TITLE}
         subtitle={Strings.PROGRAM_SUBTITLE}
@@ -252,14 +250,14 @@ const ProgramFinderScreen: React.FC<Props> = () => {
           </View>
         )}
       </ScrollView>
-    </SafeAreaView>
+      </SafeAreaView>
+    </GradientBackground>
   );
 };
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: Colors.background,
   },
   scrollContent: {
     paddingBottom: 40,
@@ -271,8 +269,8 @@ const styles = StyleSheet.create({
     marginTop: 8,
   },
   errorBanner: {
-    backgroundColor: 'rgba(255, 77, 106, 0.1)',
-    borderRadius: 10,
+    backgroundColor: 'rgba(251, 113, 133, 0.1)',
+    borderRadius: 12,
     padding: 12,
     marginBottom: 16,
     borderWidth: 1,
@@ -289,7 +287,7 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   resultsTitle: {
-    fontSize: 16,
+    fontSize: 17,
     fontWeight: '700',
     color: Colors.accent,
     marginBottom: 4,
@@ -300,12 +298,12 @@ const styles = StyleSheet.create({
     lineHeight: 19,
   },
   noResults: {
-    padding: 24,
+    padding: 28,
     alignItems: 'center',
-    backgroundColor: Colors.surface,
-    borderRadius: 14,
+    backgroundColor: Colors.glass,
+    borderRadius: 16,
     borderWidth: 1,
-    borderColor: Colors.border,
+    borderColor: Colors.glassBorder,
   },
   noResultsText: {
     color: Colors.textSecondary,
@@ -313,12 +311,12 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   programCard: {
-    backgroundColor: Colors.card,
-    borderRadius: 16,
+    backgroundColor: Colors.glass,
+    borderRadius: 18,
     padding: 18,
     marginBottom: 14,
     borderWidth: 1,
-    borderColor: Colors.border,
+    borderColor: Colors.glassBorder,
   },
   programCardHeader: {
     flexDirection: 'row',
@@ -342,7 +340,7 @@ const styles = StyleSheet.create({
   matchBadge: {
     alignItems: 'center',
     borderWidth: 1.5,
-    borderRadius: 10,
+    borderRadius: 12,
     paddingHorizontal: 10,
     paddingVertical: 6,
     minWidth: 58,
@@ -366,10 +364,12 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: Colors.surfaceElevated,
-    borderRadius: 8,
+    borderRadius: 10,
     paddingHorizontal: 10,
-    paddingVertical: 5,
+    paddingVertical: 6,
     gap: 4,
+    borderWidth: 1,
+    borderColor: Colors.border,
   },
   metaLabel: {
     fontSize: 12,
@@ -401,7 +401,7 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   careersSection: {
-    marginBottom: 12,
+    marginBottom: 14,
   },
   careersLabel: {
     fontSize: 12,
@@ -415,12 +415,12 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   careerChip: {
-    backgroundColor: 'rgba(0, 229, 195, 0.1)',
-    borderRadius: 6,
+    backgroundColor: 'rgba(139, 92, 246, 0.1)',
+    borderRadius: 8,
     paddingHorizontal: 10,
-    paddingVertical: 4,
+    paddingVertical: 5,
     borderWidth: 1,
-    borderColor: 'rgba(0, 229, 195, 0.2)',
+    borderColor: 'rgba(139, 92, 246, 0.2)',
   },
   careerText: {
     fontSize: 11,
@@ -428,14 +428,14 @@ const styles = StyleSheet.create({
     fontWeight: '500',
   },
   saveButton: {
-    borderRadius: 10,
-    paddingVertical: 10,
+    borderRadius: 12,
+    paddingVertical: 11,
     alignItems: 'center',
     borderWidth: 1.5,
     borderColor: Colors.accent,
   },
   savedButton: {
-    backgroundColor: 'rgba(0, 229, 195, 0.1)',
+    backgroundColor: 'rgba(139, 92, 246, 0.1)',
   },
   saveButtonText: {
     fontSize: 13,
