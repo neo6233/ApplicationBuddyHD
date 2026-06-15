@@ -37,10 +37,9 @@ export interface AssistantAnalysis {
 }
 export declare const buildLocalProgramResponse: (data: ProgramFinderInput) => ProgramFinderResponse;
 declare class GeminiService {
-    private getClient;
     private isEnabled;
-    private getModel;
-    private callGemini;
+    private buildUrl;
+    private callOllama;
     analyzeConversation(userMessage: string, history: Array<{
         role: 'user' | 'assistant';
         content: string;

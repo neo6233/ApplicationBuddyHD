@@ -20,4 +20,5 @@ export interface ProgramFinderResponse {
   programs: Program[];
   summary: string;
   totalFound: number;
+  suggestedLevel?: 'UG' | 'PG' | 'Diploma' | 'Any';
 }

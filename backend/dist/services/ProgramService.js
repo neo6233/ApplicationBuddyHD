@@ -44,9 +44,11 @@ const inferTargetLevel = (text) => {
     const normalized = normalize(text);
     if (includesAny(normalized, ['master', 'masters', 'msc', 'mtech', 'mba', 'postgraduate', 'pg course']))
         return 'PG';
+    if (includesAny(normalized, ['bachelor', 'bachelors', 'graduation', 'graduate', 'degree', 'undergraduate']))
+        return 'PG';
     if (includesAny(normalized, ['diploma', 'certificate']))
         return 'Diploma';
-    if (includesAny(normalized, ['bachelor', 'undergraduate', 'ug course', 'degree after 12th']))
+    if (includesAny(normalized, ['12th', '12 pass', 'class 12', 'high school', 'secondary', 'degree after 12th', 'ug course']))
         return 'UG';
     return 'Any';
 };

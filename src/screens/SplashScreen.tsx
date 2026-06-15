@@ -13,6 +13,8 @@ import Colors from '../constants/Colors';
 import {loadChatHistory} from '../redux/slices/chatSlice';
 import {loadSavedPrograms} from '../redux/slices/programSlice';
 import useAppDispatch from '../redux/hooks/useAppDispatch';
+import {resolveReachableServiceUrl} from '../config/serviceUrl';
+import {setApiBaseURL} from '../services/ApiClient';
 
 const {width} = Dimensions.get('window');
 
@@ -34,9 +36,25 @@ const SplashScreen: React.FC<Props> = ({navigation}) => {
   const ringOpacity2 = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
+    let active = true;
+
     // Pre-load Redux data
     dispatch(loadChatHistory());
     dispatch(loadSavedPrograms());
+
+    void (async () => {
+      const resolvedBaseUrl = await resolveReachableServiceUrl({
+        envKeys: ['BACKEND_URL'],
+        port: 5000,
+        path: '/api',
+        healthPath: '/health',
+        timeoutMs: 1200,
+      });
+
+      if (active) {
+        setApiBaseURL(resolvedBaseUrl);
+      }
+    })();
 
     // Animation sequence
     Animated.sequence([
@@ -102,7 +120,10 @@ const SplashScreen: React.FC<Props> = ({navigation}) => {
       navigation.replace('Home');
     }, 3000);
 
-    return () => clearTimeout(timer);
+    return () => {
+      active = false;
+      clearTimeout(timer);
+    };
   }, []);
 
   return (
@@ -150,7 +171,7 @@ const SplashScreen: React.FC<Props> = ({navigation}) => {
       {/* Bottom accent */}
       <Animated.View style={[styles.bottomBar, {opacity: accentOpacity}]}>
         <View style={styles.accentDot} />
-        <Text style={styles.bottomText}>Powered by Gemini AI</Text>
+        <Text style={styles.bottomText}>Powered by Ollama AI</Text>
         <View style={styles.accentDot} />
       </Animated.View>
     </View>

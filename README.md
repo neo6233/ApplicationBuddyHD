@@ -62,6 +62,41 @@ If everything is set up correctly, you should see your new app running in the An
 
 This is one way to run your app — you can also build it directly from Android Studio or Xcode.
 
+## Ollama on a Physical Device
+
+The app auto-detects the backend and Ollama host from the Metro bundle URL when possible.
+Use environment variables only when you want to override that automatic detection.
+
+Current defaults:
+
+```sh
+BACKEND_URL=
+OLLAMA_BASE_URL=
+OLLAMA_MODEL=gemma3:4b
+```
+
+Backend setup:
+
+```sh
+cd backend
+npm install
+npm run build
+HOST=0.0.0.0 npm start
+```
+
+If you are using a physical Android device over USB, `npm run android` now sets up `adb reverse` for ports `5000` and `11434` automatically.
+
+Ollama setup for direct device access:
+
+```sh
+OLLAMA_HOST=0.0.0.0:11434 ollama serve
+ollama pull gemma3:4b
+```
+
+If automatic detection is not enough in your setup, set `BACKEND_URL` or `OLLAMA_BASE_URL` to the LAN IP of your computer.
+
+Make sure the phone and computer are on the same Wi-Fi network, and allow ports `5000` and `11434` through the computer firewall. If you only want the backend to talk to Ollama, keep `backend/.env` as `OLLAMA_BASE_URL=http://127.0.0.1:11434`; the phone only needs access to the backend URL.
+
 ## Step 3: Modify your app
 
 Now that you have successfully run the app, let's make changes!

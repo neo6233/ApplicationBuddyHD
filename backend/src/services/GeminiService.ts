@@ -1,7 +1,6 @@
 import fs from 'fs';
 import path from 'path';
 import dotenv from 'dotenv';
-import {GoogleGenerativeAI} from '@google/generative-ai';
 import {PROGRAM_CATALOG, ProgramCatalogItem} from '../data/programCatalog';
 
 // ─── Catalog snapshot injected into every prompt ─────────────────────────────
@@ -10,18 +9,18 @@ const CATALOG_SNAPSHOT = PROGRAM_CATALOG.map(
     `• ${p.name} | ${p.university} | ${p.country} | ${p.duration} | Intake: ${p.intake} | Min: ${p.eligibility}`,
 ).join('\n');
 
-// ─── System prompt (catalog-locked, 1-line replies) ───────────────────────────
+// ─── System prompt for catalog-grounded program questions ────────────────────
 const SYSTEM_PROMPT = `You are ARIA, an AI Admission Counsellor.
 
-⚠️ CRITICAL RULES - BREAK NONE OF THESE:
-1. **ONLY RECOMMEND PROGRAMS FROM THIS EXACT CATALOG.** Never create, invent, or suggest ANY program not listed.
-2. **IF A PROGRAM IS NOT IN THIS CATALOG, DO NOT MENTION IT. EVER.**
-3. **LANGUAGE RULE - EXTREMELY IMPORTANT:**
-   - If user speaks HINDI: Reply ONLY in pure Hindi with Devanagari. NO English words. NO mixing.
+IMPORTANT RULES:
+1. Recommend a program as available in this app only when it appears in the exact catalog below.
+2. You may provide broader educational or career guidance from general knowledge, but clearly say those options are outside the current catalog.
+3. LANGUAGE RULE:
+   - If user speaks HINDI or HINGLISH: Reply in a natural mix of Hindi and English (Hinglish/Devanagari). Keep program names in English as listed in the catalog, but write the surrounding explanation/sentences in Hindi/Hinglish.
    - If user speaks ENGLISH: Reply ONLY in English. NO Hindi words. NO mixing.
-4. Reply in ONE short sentence (max 15 words). NEVER use bullet points, lists, or multiple sentences.
-5. If asked about a program not in catalog, say: "This program is not in my catalog."
-6. When recommending, list ONLY exact catalog program names.
+4. Answer the latest question directly, use conversation context, and respect corrections such as "biology, not math."
+5. Do not repeat a generic list. Use short paragraphs or a compact list only when useful.
+6. Never invent catalog facts, eligibility requirements, universities, or availability.
 
 PROGRAM CATALOG - USE ONLY EXACT NAMES FROM THIS LIST:
 ${CATALOG_SNAPSHOT}`;
@@ -30,42 +29,42 @@ ${CATALOG_SNAPSHOT}`;
 const DEFAULT_SYSTEM_PROMPT = `You are ARIA, an AI Admission Counsellor.
 
 ⚠️ CRITICAL LANGUAGE RULE:
-- If user speaks HINDI: Reply ONLY in pure Hindi. NO English words EVER.
+- If user speaks HINDI or HINGLISH: Reply in Hindi/Hinglish (a natural mix of Hindi and English).
 - If user speaks ENGLISH: Reply ONLY in English. NO Hindi words EVER.
 
-Reply concisely in one sentence. Do not invent programs not in catalog.`;
+Answer the user's actual question with concise, practical guidance. Use conversation context and respect the latest correction. You may answer general education and career questions from broad knowledge. Never claim that a program, university, or requirement exists in the app catalog unless it was provided in the conversation or catalog context.`;
 
-// ─── Gemini config ──────────────────────────────────────────────────────────
-const GEMINI_ENV_FILE = path.resolve(__dirname, '../../.env');
-let lastGeminiEnvMtimeMs = 0;
+// ─── Ollama config ──────────────────────────────────────────────────────────
+const OLLAMA_ENV_FILE = path.resolve(__dirname, '../../.env');
+let lastOllamaEnvMtimeMs = 0;
 
-const refreshGeminiEnv = (): void => {
+const refreshOllamaEnv = (): void => {
   try {
-    const stats = fs.statSync(GEMINI_ENV_FILE);
-    if (stats.mtimeMs <= lastGeminiEnvMtimeMs) {
+    const stats = fs.statSync(OLLAMA_ENV_FILE);
+    if (stats.mtimeMs <= lastOllamaEnvMtimeMs) {
       return;
     }
 
-    const fileContents = fs.readFileSync(GEMINI_ENV_FILE, 'utf8');
+    const fileContents = fs.readFileSync(OLLAMA_ENV_FILE, 'utf8');
     const parsed = dotenv.parse(fileContents);
 
     for (const [key, value] of Object.entries(parsed)) {
       process.env[key] = value;
     }
 
-    lastGeminiEnvMtimeMs = stats.mtimeMs;
+    lastOllamaEnvMtimeMs = stats.mtimeMs;
   } catch {
     // Ignore missing or unreadable env files; runtime env stays in effect.
   }
 };
 
-const getGeminiConfig = () => {
-  refreshGeminiEnv();
+const getOllamaConfig = () => {
+  refreshOllamaEnv();
 
   return {
-    apiKey: process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || '',
-    model: process.env.GEMINI_MODEL || 'gemini-2.5-flash',
-    timeoutMs: Number(process.env.GEMINI_TIMEOUT_MS || 12000),
+    baseUrl: process.env.OLLAMA_BASE_URL || process.env.OLLAMA_HOST || 'http://127.0.0.1:11434',
+    model: process.env.OLLAMA_MODEL || 'gemma3:4b',
+    timeoutMs: Number(process.env.OLLAMA_TIMEOUT_MS || 30000),
   };
 };
 
@@ -111,18 +110,11 @@ export interface AssistantAnalysis {
   };
 }
 
-// ─── Gemini message format ───────────────────────────────────────────────────
-interface GeminiPart {
-  text?: string;
-  inlineData?: {
-    mimeType: string;
-    data: string;
-  };
-}
-
-interface GeminiMessage {
-  role: 'user' | 'model';
-  parts: GeminiPart[];
+// ─── Ollama message format ───────────────────────────────────────────────────
+interface OllamaMessage {
+  role: 'system' | 'user' | 'assistant';
+  content: string;
+  images?: string[];
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -134,20 +126,116 @@ const includesAny = (text: string, keywords: string[]) =>
 
 const containsDevanagari = (text: string) => /[\u0900-\u097F]/.test(text);
 
+// ─── Comprehensive Hinglish (Romanized Hindi) Detection ──────────────────────
+const HINDI_WORDS = new Set([
+  // Pronouns & common subjects
+  'maine', 'mujhe', 'mujhko', 'mera', 'meri', 'mere', 'hum', 'humko', 'humne', 'hamara', 'hamari',
+  'tum', 'tumne', 'tumko', 'tumhara', 'tumhari', 'aap', 'aapka', 'aapki', 'aapne', 'aapko',
+  'uska', 'uski', 'unka', 'unki', 'unko', 'isko', 'iski', 'usse',
+  // Verbs & verb forms
+  'hai', 'hain', 'tha', 'thi', 'the', 'hoga', 'hogi', 'hota', 'hoti',
+  'kar', 'karo', 'karna', 'karunga', 'karungi', 'karenge', 'karte', 'karti', 'kiya', 'kiye', 'karke',
+  'liya', 'liye', 'lena', 'lete', 'leti', 'lelo', 'lijiye',
+  'diya', 'diye', 'dena', 'dete', 'deti', 'dedo', 'dijiye', 'do',
+  'raha', 'rahi', 'rahe', 'rahega', 'rahegi', 'rahenge',
+  'sakta', 'sakti', 'sakte', 'sakenge',
+  'chahiye', 'chahte', 'chahti', 'chahunga', 'chahungi',
+  'bata', 'batao', 'bataye', 'bataiye', 'batana', 'batado',
+  'padh', 'padha', 'padhi', 'padhna', 'padhke', 'padhta', 'padhti', 'padhai',
+  'chalu', 'shuru',
+  'milega', 'milegi', 'milenge', 'milta', 'milti',
+  'lagta', 'lagti', 'lagte', 'lagega',
+  'bolna', 'bolo', 'bola', 'boli',
+  'jaana', 'jao', 'jata', 'jati', 'jayega', 'jayegi',
+  'aana', 'aao', 'aata', 'aati', 'aayega', 'aayegi',
+  'dekho', 'dekhna', 'dekhte', 'dekha', 'dekhi',
+  'samjha', 'samjho', 'samjhao', 'samajh',
+  'pasand', 'pasandida',
+  // Question words
+  'kya', 'kaise', 'kaisa', 'kaisi', 'kyu', 'kyun', 'kyunki', 'kaha', 'kahan',
+  'kaun', 'kaun-sa', 'kaunsa', 'kitna', 'kitni', 'kitne', 'kidhar', 'kab',
+  'konsa', 'konsi', 'kon',
+  // Connectors & prepositions
+  'ka', 'ki', 'ke', 'ko', 'se', 'mein', 'me', 'par', 'pe', 'tak', 'wala', 'wali', 'wale',
+  'aur', 'ya', 'lekin', 'magar', 'phir', 'toh', 'to', 'bhi',
+  'ke bare', 'ke baare', 'ke liye', 'ke saath',
+  'abhi', 'ab', 'jab', 'tab',
+  // Common nouns & adjectives
+  'accha', 'achha', 'acha', 'achhi', 'achi',
+  'theek', 'thik', 'sahi',
+  'bahut', 'bohot', 'bohut', 'zyada', 'jyada',
+  'kuch', 'kuchh', 'koi', 'sab', 'sabhi',
+  'nahi', 'nahin', 'nhi', 'mat', 'na',
+  'haan', 'han', 'ji', 'bilkul',
+  'padhai', 'course', 'kaam',
+  'dost', 'bhai', 'behen',
+  'paisa', 'paise', 'rupaye',
+  'saal', 'mahina', 'din',
+  'baad', 'pehle', 'pahle',
+  'saath', 'sath',
+  'jaruri', 'zaroori', 'zaruri',
+  'dusra', 'dusri', 'doosra', 'doosri',
+  // Education-related Hinglish
+  'padhna', 'padhke', 'padhta',
+  'pass', 'paas',
+  'barahvi', 'dasvi',
+  'wahan', 'yahan', 'idhar', 'udhar',
+  // Common phrases used as single words
+  'suno', 'suniye', 'sunte',
+  'chalo', 'chaliye', 'chalega',
+  'pata', 'maloom',
+  'shukriya', 'dhanyawad', 'dhanyavaad',
+]);
+
+const HINDI_BIGRAMS = [
+  'kar liya', 'kar diya', 'kar do', 'kar raha', 'kar rahi',
+  'pass kiya', 'pass kar', 'pass ki',
+  'ke bare', 'ke baare', 'ke liye', 'ke saath', 'ke baad',
+  'mein pass', 'mein padha', 'mein kiya',
+  'kya hai', 'kaisa hai', 'kaisi hai', 'kaisa rahega', 'kaisa hoga',
+  'batao na', 'bata do', 'bata dijiye',
+  'mujhe batao', 'mujhe bata', 'mujhe chahiye',
+  'kuch aur', 'kuchh aur', 'aur batao', 'aur kuch',
+  'mere liye', 'mere pass', 'mere paas',
+  'mai ne', 'mein ne',
+  'save karo', 'save kar',
+];
+
+const detectHinglish = (text: string): boolean => {
+  const normalized = normalize(text);
+  const words = normalized.split(/\s+/);
+  
+  const bigramCount = HINDI_BIGRAMS.filter(bg => normalized.includes(bg)).length;
+  if (bigramCount >= 1) return true;
+  
+  let hindiWordCount = 0;
+  for (const word of words) {
+    if (HINDI_WORDS.has(word)) {
+      hindiWordCount++;
+    }
+  }
+  
+  if (words.length <= 5 && hindiWordCount >= 2) return true;
+  if (words.length > 5 && hindiWordCount >= 3) return true;
+  if (words.length > 0 && hindiWordCount / words.length >= 0.3) return true;
+  
+  return false;
+};
+
 const detectReplyLanguage = (userMessage: string, history: Array<{role: 'user' | 'assistant'; content: string; image?: string | null}>): 'hi' | 'en' => {
   // Most reliable: decide from the current message only.
   if (containsDevanagari(userMessage)) return 'hi';
+  if (detectHinglish(userMessage)) return 'hi';
 
-  // Check for Hindi grammar patterns
-  const normalized = normalize(userMessage);
-  const hindiPatterns = [
-    ' mujhe ', ' kya ', ' kaise ', ' kyu ', ' kyun ', ' batao ', ' chahiye ', 
-    ' karna ', ' kaun ', ' kis ', ' aap ', ' hai ', ' hain ', ' aapka ', ' mere ',
-    ' karte ', ' kar ', ' sakte ', ' sakta ', ' sakti '
-  ];
-  
-  if (hindiPatterns.some(pattern => normalized.includes(pattern))) {
-    return 'hi';
+  const recentAssistant = history.filter(m => m.role === 'assistant').slice(-2);
+  const recentHindi = recentAssistant.filter(m => {
+    return containsDevanagari(m.content);
+  });
+  if (recentHindi.length >= 1) {
+    const normalized = normalize(userMessage);
+    const words = normalized.split(/\s+/);
+    const anyHindiWord = words.some(w => HINDI_WORDS.has(w));
+    if (anyHindiWord) return 'hi';
   }
 
   return 'en';
@@ -156,27 +244,6 @@ const detectReplyLanguage = (userMessage: string, history: Array<{role: 'user' |
 const normalizeImageData = (image?: string | null): string | undefined => {
   if (!image) return undefined;
   return image.replace(/^data:image\/[a-zA-Z0-9.+-]+;base64,/, '').trim();
-};
-
-const extractImageMimeType = (image?: string | null): string => {
-  const match = image?.match(/^data:(image\/[a-zA-Z0-9.+-]+);base64,/i);
-  return match?.[1] || 'image/jpeg';
-};
-
-const toGeminiParts = (text: string, image?: string | null): GeminiPart[] => {
-  const parts: GeminiPart[] = [{text}];
-  const normalizedImage = normalizeImageData(image);
-
-  if (normalizedImage) {
-    parts.push({
-      inlineData: {
-        mimeType: extractImageMimeType(image),
-        data: normalizedImage,
-      },
-    });
-  }
-
-  return parts;
 };
 
 const safeJsonParse = <T>(text: string): T | null => {
@@ -263,7 +330,7 @@ const scoreCatalogItem = (item: ProgramCatalogItem, data: ProgramFinderInput): n
   return Math.max(35, Math.min(98, total));
 };
 
-// ─── Local fallback for offline / unreachable Gemini ────────────────────────
+// ─── Local fallback for offline / unreachable Ollama ────────────────────────
 const buildLocalFallbackReply = (userMessage: string, language: 'hi' | 'en' = 'en'): string | null => {
   const msg = normalize(userMessage);
   if (includesAny(msg, ['duration', 'how long', 'years', 'months'])) {
@@ -304,7 +371,7 @@ const buildLocalFallbackReply = (userMessage: string, language: 'hi' | 'en' = 'e
 
 const buildLanguageInstruction = (language: 'hi' | 'en'): string =>
   language === 'hi'
-    ? 'आप केवल हिंदी में जवाब दीजिए। कोई अंग्रेजी शब्द नहीं। शुद्ध हिंदी केवल।'
+    ? 'The user speaks Hindi/Hinglish. Reply in Hinglish (a natural mix of Hindi and English, using Devanagari script or clean Roman script) so it is easy for them to read. You can keep the program names in English (e.g. "Bachelor of Computer Science") but write the surrounding explanation/sentences in Hindi/Hinglish.'
     : 'Answer ONLY in English. NO Hindi words. Pure English only.';
 
 export const buildLocalProgramResponse = (data: ProgramFinderInput): ProgramFinderResponse => {
@@ -342,62 +409,71 @@ const parseAssistantAnalysis = (text: string): AssistantAnalysis | null => {
   }
 };
 
-// ─── GeminiService (same public API as the old service) ─────────────────────
+// ─── GeminiService (same public API, Ollama-backed implementation) ──────────
 class GeminiService {
-  private getClient() {
-    const {apiKey} = getGeminiConfig();
-    return new GoogleGenerativeAI(apiKey);
-  }
-
   private isEnabled(): boolean {
-    return Boolean(getGeminiConfig().apiKey);
+    return Boolean(getOllamaConfig().baseUrl);
   }
 
-  private getModel(systemPrompt?: string) {
-    const {model} = getGeminiConfig();
-
-    return this.getClient().getGenerativeModel({
-      model,
-      systemInstruction: systemPrompt || undefined,
-    });
+  private buildUrl(): string {
+    return `${getOllamaConfig().baseUrl.replace(/\/+$/, '')}/api/chat`;
   }
 
-  private async callGemini(payload: {
+  private async callOllama(payload: {
     systemPrompt?: string;
-    messages: GeminiMessage[];
+    messages: OllamaMessage[];
     temperature?: number;
     jsonMode?: boolean;
     maxOutputTokens?: number;
   }): Promise<string> {
     if (!this.isEnabled()) {
-      throw new Error('GEMINI_API_KEY is not configured');
+      throw new Error('OLLAMA_BASE_URL is not configured');
     }
 
-    const {timeoutMs} = getGeminiConfig();
+    const {model, timeoutMs} = getOllamaConfig();
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), timeoutMs);
+    const messages: OllamaMessage[] = [
+      {role: 'system', content: payload.systemPrompt || DEFAULT_SYSTEM_PROMPT},
+      ...payload.messages,
+    ];
 
-    const timeoutPromise = new Promise<never>((_, reject) => {
-      setTimeout(() => reject(new Error('Gemini request timed out')), timeoutMs);
-    });
+    try {
+      const response = await fetch(this.buildUrl(), {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({
+          model,
+          messages,
+          stream: false,
+          options: {
+            temperature: payload.temperature ?? 0.2,
+            top_p: 0.9,
+            num_predict: payload.maxOutputTokens ?? 120,
+          },
+          ...(payload.jsonMode ? {format: 'json'} : {}),
+        }),
+        signal: controller.signal as any,
+      });
 
-    const generatePromise = this.getModel(payload.systemPrompt).generateContent({
-      contents: payload.messages as any,
-      generationConfig: {
-        temperature: payload.temperature ?? 0.2,
-        topP: 0.9,
-        maxOutputTokens: payload.maxOutputTokens ?? 120,
-        responseMimeType: payload.jsonMode ? 'application/json' : undefined,
-      },
-    });
+      const rawText = await response.text();
+      const data = rawText ? JSON.parse(rawText) : {};
 
-    const result = await Promise.race([generatePromise, timeoutPromise]) as Awaited<typeof generatePromise>;
-    const reply = result.response.text().trim();
+      if (!response.ok) {
+        const errorMessage = data?.error || `Ollama error ${response.status}`;
+        throw new Error(typeof errorMessage === 'string' ? errorMessage : JSON.stringify(errorMessage));
+      }
 
-    if (!reply) {
-      throw new Error('Gemini returned an empty response.');
+      const reply = data?.message?.content?.trim() || '';
+      if (!reply) {
+        throw new Error('Ollama returned an empty response.');
+      }
+
+      console.log('[OllamaService] Reply:', reply.slice(0, 120));
+      return reply;
+    } finally {
+      clearTimeout(timeout);
     }
-
-    console.log('[GeminiService] Reply:', reply.slice(0, 120));
-    return reply;
   }
 
   // ── analyzeConversation ────────────────────────────────────────────────────
@@ -440,9 +516,9 @@ ${conversationText}
 USER: ${userMessage}`;
 
     try {
-      const raw = await this.callGemini({
+      const raw = await this.callOllama({
         systemPrompt: 'You are a strict JSON analyzer. Extract ALL available student profile information from the conversation. Return valid JSON only, no extra text.',
-        messages: [{role: 'user', parts: [{text: prompt}]}],
+        messages: [{role: 'user', content: prompt}],
         temperature: 0,
         jsonMode: true,
         maxOutputTokens: 256,
@@ -451,7 +527,7 @@ USER: ${userMessage}`;
       console.log('[PARSED ANALYSIS]', JSON.stringify(analysis, null, 2));
       return analysis;
     } catch (err: any) {
-      console.warn('[GeminiService] analyzeConversation error — defaulting to general:', err.message);
+      console.warn('[OllamaService] analyzeConversation error — defaulting to general:', err.message);
       return {topic: 'general', confidence: 0.5, needsMoreInfo: false, summary: 'Fallback: error'};
     }
   }
@@ -468,16 +544,17 @@ USER: ${userMessage}`;
       language?: 'hi' | 'en';
     },
   ): Promise<string> {
-    // Convert history to Gemini message format.
     const normalizedUserImage = normalizeImageData(options?.userImage);
-    const messages: GeminiMessage[] = [
+    const messages: OllamaMessage[] = [
       ...history.map(msg => ({
-        role: (msg.role === 'assistant' ? 'model' : 'user') as 'user' | 'model',
-        parts: toGeminiParts(msg.content, msg.image),
+        role: (msg.role === 'assistant' ? 'assistant' : 'user') as OllamaMessage['role'],
+        content: msg.content,
+        ...(normalizeImageData(msg.image) ? {images: [normalizeImageData(msg.image)!]} : {}),
       })),
       {
         role: 'user',
-        parts: toGeminiParts(userMessage, normalizedUserImage),
+        content: userMessage,
+        ...(normalizedUserImage ? {images: [normalizedUserImage]} : {}),
       },
     ];
 
@@ -509,7 +586,7 @@ USER: ${userMessage}`;
 
       const languageInstruction = buildLanguageInstruction(replyLanguage);
 
-      return await this.callGemini({
+      return await this.callOllama({
         systemPrompt: promptPrefix
           ? `${promptPrefix}\n\n${selectedSystemPrompt}\n\n${languageInstruction}`
           : `${selectedSystemPrompt}\n\n${languageInstruction}`,
@@ -518,10 +595,10 @@ USER: ${userMessage}`;
         maxOutputTokens: options?.maxOutputTokens ?? 256,
       });
     } catch (err: any) {
-      console.warn('[GeminiService] chat error — using local catalog fallback:', err.message);
+      console.warn('[OllamaService] chat error — using local catalog fallback:', err.message);
       const localReply = buildLocalFallbackReply(userMessage, replyLanguage);
       if (localReply) return localReply;
-      return 'Gemini is unreachable right now. Please check your API key and network connection.';
+      return 'Ollama is unreachable right now. Please ensure the Ollama service is running.';
     }
   }
 
@@ -537,9 +614,9 @@ Schema: {"eligibleCourses":[{"name":"","university":"","country":"","minimumRequ
 Student: qualification=${data.qualification}, percentage=${data.percentage}, english=${data.englishScore}, experience=${data.workExperience || 'None'}
 Only use programs from the catalog. Status: eligible | conditional | not_eligible. Give 3 eligible and 2 not-eligible.`;
 
-    return this.callGemini({
+    return this.callOllama({
       systemPrompt: 'You are ARIA. Answer strictly from the catalog. Return JSON only.',
-      messages: [{role: 'user', parts: [{text: prompt}]}],
+      messages: [{role: 'user', content: prompt}],
       temperature: 0.1,
       jsonMode: true,
       maxOutputTokens: 1024,

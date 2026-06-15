@@ -5,11 +5,32 @@ import axios, {
 } from 'axios';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {BASE_URL} from '../constants/Endpoints';
+import {resolveReachableServiceUrl} from '../config/serviceUrl';
 
 const AUTH_TOKEN_KEY = '@aria_auth_token';
+let currentBaseURL = BASE_URL;
+let baseURLResolutionPromise: Promise<string> | null = null;
+
+const resolveAndCacheBaseURL = async (): Promise<string> => {
+  if (!baseURLResolutionPromise) {
+    baseURLResolutionPromise = resolveReachableServiceUrl({
+      envKeys: ['BACKEND_URL'],
+      port: 5000,
+      path: '/api',
+      healthPath: '/health',
+      timeoutMs: 1200,
+    }).then(resolvedBaseURL => {
+      currentBaseURL = resolvedBaseURL.replace(/\/+$/, '');
+      ApiClient.defaults.baseURL = currentBaseURL;
+      return currentBaseURL;
+    });
+  }
+
+  return baseURLResolutionPromise;
+};
 
 const ApiClient: AxiosInstance = axios.create({
-  baseURL: BASE_URL,
+  baseURL: currentBaseURL,
   timeout: 60000, // 60 seconds for AI responses
   headers: {
     'Content-Type': 'application/json',
@@ -21,10 +42,14 @@ const ApiClient: AxiosInstance = axios.create({
 ApiClient.interceptors.request.use(
   async (config: InternalAxiosRequestConfig) => {
     try {
+      await resolveAndCacheBaseURL();
+
       const token = await AsyncStorage.getItem(AUTH_TOKEN_KEY);
       if (token && config.headers) {
         config.headers.Authorization = `Bearer ${token}`;
       }
+
+      config.baseURL = currentBaseURL;
     } catch {
       // Silently fail if AsyncStorage unavailable
     }
@@ -68,7 +93,7 @@ ApiClient.interceptors.response.use(
       }
     } else if (error.request) {
       error.message =
-        'Cannot reach the backend. On a physical device, set BACKEND_URL to your computer\'s LAN IP, for example http://192.168.1.20:5000/api, and make sure the backend is running. On Android emulator, use http://10.0.2.2:5000/api; on iOS simulator, use http://localhost:5000/api.';
+        'Cannot reach the backend. The app now tries the resolved backend URL automatically, so this usually means the backend is not running, the phone cannot reach your Mac on port 5000, or an old build is still installed.';
     } else {
       error.message = 'An unexpected error occurred.';
     }
@@ -82,6 +107,12 @@ export const setAuthToken = async (token: string) => {
 
 export const clearAuthToken = async () => {
   await AsyncStorage.removeItem(AUTH_TOKEN_KEY);
+};
+
+export const setApiBaseURL = (baseURL: string) => {
+  currentBaseURL = baseURL.replace(/\/+$/, '');
+  ApiClient.defaults.baseURL = currentBaseURL;
+  baseURLResolutionPromise = Promise.resolve(currentBaseURL);
 };
 
 export default ApiClient;

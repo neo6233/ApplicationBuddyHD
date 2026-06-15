@@ -1,10 +1,9 @@
-import {Platform} from 'react-native';
+import {resolveLocalServiceUrl} from './serviceUrl';
 
-export const BACKEND_URL =
-  (typeof process !== 'undefined' &&
-    (process as any)?.env?.BACKEND_URL) ||
-  (Platform.OS === 'android'
-    ? 'http://10.132.248.142:5000/api'
-    : 'http://10.132.248.142:5000/api');
+export const BACKEND_URL = resolveLocalServiceUrl({
+  envKeys: ['BACKEND_URL'],
+  port: 5000,
+  path: '/api',
+});
 
 export const getDefaultLocalBaseUrl = () => BACKEND_URL;

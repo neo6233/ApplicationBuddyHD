@@ -4,12 +4,28 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.eligibilityController = exports.programFinderController = exports.chatController = exports.healthController = void 0;
-const GeminiService_1 = __importDefault(require("../services/GeminiService")); // Gemini-backed service with the same controller API
+const GeminiService_1 = __importDefault(require("../services/GeminiService")); // Ollama-backed service with the same controller API
 const ProgramService_1 = __importDefault(require("../services/ProgramService"));
 const programCatalog_1 = require("../data/programCatalog");
 const appRules_1 = require("../data/appRules");
 const VectorKnowledgeService_1 = __importDefault(require("../services/VectorKnowledgeService"));
-const normalize = (text) => text.toLowerCase().replace(/[\u2018\u2019]/g, "'").replace(/\s+/g, ' ').trim();
+const toSafeText = (value) => {
+    if (typeof value === 'string') {
+        return value;
+    }
+    if (value === null || value === undefined) {
+        return '';
+    }
+    if (typeof value === 'object') {
+        const candidate = value;
+        const nested = candidate.content ?? candidate.text ?? candidate.message;
+        if (typeof nested === 'string') {
+            return nested;
+        }
+    }
+    return String(value);
+};
+const normalize = (text) => toSafeText(text).toLowerCase().replace(/[\u2018\u2019]/g, "'").replace(/\s+/g, ' ').trim();
 const includesAny = (text, keywords) => keywords.some(keyword => text.includes(keyword));
 const inferQuestionIntent = (text) => {
     const normalized = normalize(text);
@@ -70,6 +86,7 @@ const inferLevel = (text) => {
 const extractProfileLocally = (message, history) => {
     const fullText = `${history.filter(h => h.role === 'user').map(h => h.content).join(' ')} ${message}`;
     const normalized = normalize(fullText);
+    const currentMessage = normalize(message);
     // Extract level
     let level = '';
     if (includesAny(normalized, ['12th', '12वीं', 'बारहवीं', 'secondary', 'intermediate', 'इंटरमीडिएट'])) {
@@ -84,40 +101,139 @@ const extractProfileLocally = (message, history) => {
     else if (includesAny(normalized, ['diploma', 'डिप्लोमा'])) {
         level = 'Diploma';
     }
-    // Extract field
-    let field = '';
-    if (includesAny(normalized, ['computer', 'cs', 'it', 'software', 'कंप्यूटर', 'सीएस', 'आईटी', 'सॉफ्टवेयर'])) {
-        field = 'computer science';
-    }
-    else if (includesAny(normalized, ['data science', 'data', 'analytics', 'डेटा', 'एनालिटिक्स'])) {
-        field = 'data science';
-    }
-    else if (includesAny(normalized, ['engineering', 'engineer', 'इंजीनियर'])) {
-        field = 'engineering';
-    }
-    else if (includesAny(normalized, ['business', 'commerce', 'management', 'mba', 'बिजनेस', 'कॉमर्स'])) {
-        field = 'business';
-    }
-    else if (includesAny(normalized, ['healthcare', 'health', 'medical', 'nurse', 'हेल्थ', 'मेडिकल'])) {
-        field = 'healthcare';
-    }
+    const extractField = (text) => {
+        if (includesAny(text, ['biology', 'biological', 'pcb', 'medical', 'medicine', 'doctor', 'nursing', 'pharmacy', 'healthcare', 'health', 'बायोलॉजी', 'मेडिकल'])) {
+            return 'biology and healthcare';
+        }
+        if (includesAny(text, ['data science', 'analytics', 'machine learning', 'डेटा', 'एनालिटिक्स'])) {
+            return 'data science';
+        }
+        if (includesAny(text, ['computer science', 'computer', 'coding', 'software', 'कंप्यूटर', 'सीएस', 'आईटी', 'सॉफ्टवेयर'])) {
+            return 'computer science';
+        }
+        if (includesAny(text, ['engineering', 'engineer', 'इंजीनियर']))
+            return 'engineering';
+        if (includesAny(text, ['business', 'commerce', 'management', 'mba', 'बिजनेस', 'कॉमर्स']))
+            return 'business';
+        return '';
+    };
+    // The newest message wins when the student corrects or changes their profile.
+    const field = extractField(currentMessage) || extractField(normalized);
     // Extract score
     const scoreMatch = fullText.match(/(\d{1,3})%/);
     const score = scoreMatch ? scoreMatch[1] : '';
     return { level, field, score };
 };
 const containsDevanagari = (message) => /[\u0900-\u097F]/.test(message);
+// ─── Comprehensive Hinglish (Romanized Hindi) Detection ──────────────────────
+const HINDI_WORDS = new Set([
+    // Pronouns & common subjects
+    'maine', 'mujhe', 'mujhko', 'mera', 'meri', 'mere', 'hum', 'humko', 'humne', 'hamara', 'hamari',
+    'tum', 'tumne', 'tumko', 'tumhara', 'tumhari', 'aap', 'aapka', 'aapki', 'aapne', 'aapko',
+    'uska', 'uski', 'unka', 'unki', 'unko', 'isko', 'iski', 'usse',
+    // Verbs & verb forms
+    'hai', 'hain', 'tha', 'thi', 'the', 'hoga', 'hogi', 'hota', 'hoti',
+    'kar', 'karo', 'karna', 'karunga', 'karungi', 'karenge', 'karte', 'karti', 'kiya', 'kiye', 'karke',
+    'liya', 'liye', 'lena', 'lete', 'leti', 'lelo', 'lijiye',
+    'diya', 'diye', 'dena', 'dete', 'deti', 'dedo', 'dijiye', 'do',
+    'raha', 'rahi', 'rahe', 'rahega', 'rahegi', 'rahenge',
+    'sakta', 'sakti', 'sakte', 'sakenge',
+    'chahiye', 'chahte', 'chahti', 'chahunga', 'chahungi',
+    'bata', 'batao', 'bataye', 'bataiye', 'batana', 'batado',
+    'padh', 'padha', 'padhi', 'padhna', 'padhke', 'padhta', 'padhti', 'padhai',
+    'chalu', 'shuru',
+    'milega', 'milegi', 'milenge', 'milta', 'milti',
+    'lagta', 'lagti', 'lagte', 'lagega',
+    'bolna', 'bolo', 'bola', 'boli',
+    'jaana', 'jao', 'jata', 'jati', 'jayega', 'jayegi',
+    'aana', 'aao', 'aata', 'aati', 'aayega', 'aayegi',
+    'dekho', 'dekhna', 'dekhte', 'dekha', 'dekhi',
+    'samjha', 'samjho', 'samjhao', 'samajh',
+    'pasand', 'pasandida',
+    // Question words
+    'kya', 'kaise', 'kaisa', 'kaisi', 'kyu', 'kyun', 'kyunki', 'kaha', 'kahan',
+    'kaun', 'kaun-sa', 'kaunsa', 'kitna', 'kitni', 'kitne', 'kidhar', 'kab',
+    'konsa', 'konsi', 'kon',
+    // Connectors & prepositions
+    'ka', 'ki', 'ke', 'ko', 'se', 'mein', 'me', 'par', 'pe', 'tak', 'wala', 'wali', 'wale',
+    'aur', 'ya', 'lekin', 'magar', 'phir', 'toh', 'to', 'bhi',
+    'ke bare', 'ke baare', 'ke liye', 'ke saath',
+    'abhi', 'ab', 'jab', 'tab',
+    // Common nouns & adjectives
+    'accha', 'achha', 'acha', 'achhi', 'achi',
+    'theek', 'thik', 'sahi',
+    'bahut', 'bohot', 'bohut', 'zyada', 'jyada',
+    'kuch', 'kuchh', 'koi', 'sab', 'sabhi',
+    'nahi', 'nahin', 'nhi', 'mat', 'na',
+    'haan', 'han', 'ji', 'bilkul',
+    'padhai', 'course', 'kaam',
+    'dost', 'bhai', 'behen',
+    'paisa', 'paise', 'rupaye',
+    'saal', 'mahina', 'din',
+    'baad', 'pehle', 'pahle',
+    'saath', 'sath',
+    'jaruri', 'zaroori', 'zaruri',
+    'dusra', 'dusri', 'doosra', 'doosri',
+    // Education-related Hinglish
+    'padhna', 'padhke', 'padhta',
+    'pass', 'paas',
+    'barahvi', 'dasvi',
+    'wahan', 'yahan', 'idhar', 'udhar',
+    // Common phrases used as single words
+    'suno', 'suniye', 'sunte',
+    'chalo', 'chaliye', 'chalega',
+    'pata', 'maloom',
+    'shukriya', 'dhanyawad', 'dhanyavaad',
+]);
+const HINDI_BIGRAMS = [
+    'kar liya', 'kar diya', 'kar do', 'kar raha', 'kar rahi',
+    'pass kiya', 'pass kar', 'pass ki',
+    'ke bare', 'ke baare', 'ke liye', 'ke saath', 'ke baad',
+    'mein pass', 'mein padha', 'mein kiya',
+    'kya hai', 'kaisa hai', 'kaisi hai', 'kaisa rahega', 'kaisa hoga',
+    'batao na', 'bata do', 'bata dijiye',
+    'mujhe batao', 'mujhe bata', 'mujhe chahiye',
+    'kuch aur', 'kuchh aur', 'aur batao', 'aur kuch',
+    'mere liye', 'mere pass', 'mere paas',
+    'mai ne', 'mein ne',
+    'save karo', 'save kar',
+];
+const detectHinglish = (text) => {
+    const normalized = normalize(text);
+    const words = normalized.split(/\s+/);
+    const bigramCount = HINDI_BIGRAMS.filter(bg => normalized.includes(bg)).length;
+    if (bigramCount >= 1)
+        return true;
+    let hindiWordCount = 0;
+    for (const word of words) {
+        if (HINDI_WORDS.has(word)) {
+            hindiWordCount++;
+        }
+    }
+    if (words.length <= 5 && hindiWordCount >= 2)
+        return true;
+    if (words.length > 5 && hindiWordCount >= 3)
+        return true;
+    if (words.length > 0 && hindiWordCount / words.length >= 0.3)
+        return true;
+    return false;
+};
 const detectResponseLanguage = (message, history) => {
-    // Decide from the current message only so one Hindi turn does not lock the whole thread.
     if (containsDevanagari(message))
         return 'hi';
-    // Check for common Hindi question words
-    const normalized = normalize(message);
-    const hindiIndicators = [' mujhe ', ' kya ', ' kaise ', ' kyu ', ' kyun ', ' batao ', ' chahiye ', ' karna ', ' kaun ', ' kis ', ' aap ', ' hai ', ' hain ', ' aapka ', ' mere '];
-    if (hindiIndicators.some(indicator => normalized.includes(indicator))) {
+    if (detectHinglish(message))
         return 'hi';
+    const recentAssistant = history.filter(m => m.role === 'assistant').slice(-2);
+    const recentHindi = recentAssistant.filter(m => {
+        return containsDevanagari(m.content);
+    });
+    if (recentHindi.length >= 1) {
+        const normalized = normalize(message);
+        const words = normalized.split(/\s+/);
+        const anyHindiWord = words.some(w => HINDI_WORDS.has(w));
+        if (anyHindiWord)
+            return 'hi';
     }
-    // Default to English for ambiguous cases
     return 'en';
 };
 const isGreetingMessage = (text) => {
@@ -175,7 +291,7 @@ const TRANSLITERATION_MAP = {
     'सावे': 'save',
 };
 const transliterateText = (text) => {
-    let normalized = text.toLowerCase();
+    let normalized = toSafeText(text).toLowerCase();
     const phrases = [
         { key: 'better of', val: 'bachelor of' },
         { key: 'बेटर ऑफ़', val: 'bachelor of' },
@@ -226,9 +342,45 @@ const isSaveIntent = (text) => {
     const origWords = normalize(text).split(/\s+/);
     return ['save', 'सेव', 'बचाओ', 'रखो'].some(kw => words.includes(kw) || origWords.includes(kw));
 };
-const PROGRAM_NAME_LIST = [...programCatalog_1.PROGRAM_CATALOG]
-    .map(program => program.name)
-    .sort((a, b) => b.length - a.length);
+const isProgramSelectionIntent = (text) => {
+    const normalized = normalize(transliterateText(text));
+    return includesAny(normalized, [
+        'i choose',
+        'i select',
+        'i will take',
+        'i will go with',
+        'finalize this',
+        'finalise this',
+        'this is my final',
+        'choose this course',
+        'select this course',
+        'go with this course',
+        'ye final',
+        'yeh final',
+        'isko final',
+        'is course ko final',
+    ]);
+};
+const isFinalChoiceRequest = (text) => {
+    const normalized = normalize(transliterateText(text));
+    return /\b(?:choose|select|finali[sz]e)\b[\s\S]*\b(?:one|course|program)\b/i.test(normalized) || includesAny(normalized, [
+        'best one',
+        'one best',
+        'final course',
+        'final program',
+        'choose one',
+        'select one',
+        'which should i choose',
+        'which one should i choose',
+        'which should i go with',
+        'which one is best for me',
+        'mere liye best one',
+        'ek best course',
+    ]);
+};
+// const PROGRAM_NAME_LIST = [...PROGRAM_CATALOG]
+//   .map(program => program.name)
+//   .sort((a, b) => b.length - a.length);
 const findProgramMentions = (text) => {
     const transliterated = transliterateText(text);
     const normalized = normalize(transliterated);
@@ -314,6 +466,16 @@ const getLastRecommendedProgram = (history) => {
     }
     return null;
 };
+const getBestRecommendedProgram = (history) => {
+    for (let i = history.length - 1; i >= 0; i--) {
+        const programs = history[i].programs;
+        if (!programs?.length)
+            continue;
+        const best = [...programs].sort((a, b) => (b.matchScore || 0) - (a.matchScore || 0))[0];
+        return getCatalogProgramByName(best.name) || best;
+    }
+    return null;
+};
 const getRecentlyRecommendedProgramNames = (history) => {
     const names = new Set();
     history.forEach(message => {
@@ -329,14 +491,15 @@ const filterProgramsByLevel = (programs, message) => {
     return programs.filter(program => program.level === levelHint);
 };
 const resolveProgramFromKeywords = (message) => {
-    const keywordMatches = ProgramService_1.default.searchByKeyword(message);
+    const messageText = toSafeText(message);
+    const keywordMatches = ProgramService_1.default.searchByKeyword(messageText);
     if (keywordMatches.length === 0) {
         return null;
     }
     if (keywordMatches.length === 1) {
         return keywordMatches[0];
     }
-    const levelFiltered = filterProgramsByLevel(keywordMatches, message);
+    const levelFiltered = filterProgramsByLevel(keywordMatches, messageText);
     if (levelFiltered.length === 1) {
         return levelFiltered[0];
     }
@@ -380,8 +543,14 @@ const resolveProgramFromConversation = (message, history) => {
     if (keywordMatch) {
         return { program: keywordMatch, ambiguous: false };
     }
+    if (isFinalChoiceRequest(message)) {
+        const bestRecommended = getBestRecommendedProgram(history);
+        if (bestRecommended) {
+            return { program: bestRecommended, ambiguous: false };
+        }
+    }
     // 3. If it's a follow-up question, reuse the last recommended program from history
-    if (isFollowUpProgramQuestion(message) && !hasFreshQualificationSignal(message)) {
+    if ((isFollowUpProgramQuestion(message) || isProgramSelectionIntent(message)) && !hasFreshQualificationSignal(message)) {
         const lastRecommended = getLastRecommendedProgram(history) || findLastMentionedProgram(history);
         if (lastRecommended) {
             return { program: lastRecommended, ambiguous: false };
@@ -406,6 +575,84 @@ const buildProgramRecommendationText = (programs, language, intro) => {
         : 'These are the best matching courses from my catalog:');
     return `${heading}\n${visiblePrograms.map(program => `• ${program.name} - ${program.eligibility}`).join('\n')}`;
 };
+const hasExplicitlyNoMathBackground = (text) => {
+    const normalized = normalize(text);
+    return includesAny(normalized, [
+        'not math',
+        'no math',
+        'without math',
+        'biology not math',
+        'pcb background',
+        'pcb stream',
+        'maths nahi',
+        'math nahi',
+    ]);
+};
+const programMatchesField = (program, field) => {
+    const programText = normalize(`${program.name} ${program.fields.join(' ')}`);
+    const normalizedField = normalize(field);
+    if (includesAny(normalizedField, ['biology', 'health', 'medical', 'pharmacy', 'nursing'])) {
+        return includesAny(programText, ['biology', 'health', 'medical', 'pharmacy', 'nursing']);
+    }
+    if (includesAny(normalizedField, ['data science', 'analytics', 'machine learning'])) {
+        return includesAny(programText, ['data science', 'analytics', 'machine learning', 'statistics', 'ai']);
+    }
+    if (includesAny(normalizedField, ['computer', 'software', 'coding', 'it'])) {
+        return includesAny(programText, ['computer', 'software', 'technology', ' it']);
+    }
+    if (includesAny(normalizedField, ['business', 'commerce', 'management'])) {
+        return includesAny(programText, ['business', 'commerce', 'management', 'marketing']);
+    }
+    if (normalizedField.includes('engineering'))
+        return programText.includes('engineering');
+    return true;
+};
+const selectCompatiblePrograms = (programs, field, userContext) => programs.filter(program => {
+    if (!programMatchesField(program, field))
+        return false;
+    if (hasExplicitlyNoMathBackground(userContext) && /math|mathematics/i.test(program.eligibility))
+        return false;
+    return true;
+});
+const buildRecommendationPrompt = (message, profile, programs, language) => {
+    const catalogContext = programs.length
+        ? programs.slice(0, 5).map(program => `- ${program.name}: ${program.eligibility}; careers: ${program.careerOpportunities.join(', ')}`).join('\n')
+        : 'No catalog program is a strong subject and eligibility match.';
+    return `Answer the student's latest question as an intelligent admission counsellor.
+
+Latest question: ${message}
+Student profile: ${JSON.stringify(profile)}
+Compatible programs in this app's catalog:
+${catalogContext}
+
+Instructions:
+1. Treat the latest user correction as authoritative. Never assume math when they say PCB, biology, or no math.
+2. Answer the exact question first and briefly explain your reasoning.
+3. Recommend only the compatible catalog programs listed above as programs available in this app.
+4. Previous assistant recommendations may be wrong. Do not copy or defend program names from earlier assistant replies.
+5. If there is no suitable catalog match, do not mention any previous catalog program as relevant. Say there is no direct match, then give useful general education paths from your knowledge, clearly labeling them as general options outside the current catalog.
+6. Do not repeat a previous generic course list. Ask at most one useful follow-up question.
+7. Reply in ${language === 'hi' ? 'natural Hindi/Hinglish' : 'English only'} using short paragraphs or a compact list.`;
+};
+const buildNoCatalogMatchReply = (field, language) => {
+    const isBiologyProfile = includesAny(normalize(field), ['biology', 'health', 'medical', 'pharmacy', 'nursing']);
+    if (isBiologyProfile) {
+        return language === 'hi'
+            ? 'आप सही हैं: PCB/biology background और बिना mathematics के Computer Science, IT Engineering, या Data Science सही recommendations नहीं हैं। मेरे current catalog में direct biology/medical UG match नहीं है। Catalog के बाहर general options में MBBS, BDS, B.Pharm, BSc Nursing, Biotechnology, Microbiology, Biochemistry, और Allied Health courses शामिल हैं। आप clinical work, research, pharmacy, या healthcare में से किस दिशा में जाना चाहते हैं?'
+            : 'You are right: with a PCB/biology background and no mathematics, Computer Science, IT Engineering, and Data Science are not suitable recommendations. My current catalog has no direct biology or medical undergraduate match. General options outside the catalog include MBBS, BDS, B.Pharm, BSc Nursing, Biotechnology, Microbiology, Biochemistry, and allied health courses. Are you more interested in clinical work, research, pharmacy, or healthcare?';
+    }
+    return language === 'hi'
+        ? 'मेरे current catalog में आपके profile का direct match नहीं है। मैं गलत course suggest नहीं करना चाहता। अपना preferred subject या career goal बताइए, ताकि मैं catalog के बाहर भी सही general pathways समझा सकूँ।'
+        : 'My current catalog does not have a direct match for your profile, and I do not want to suggest an unsuitable course. Tell me your preferred subject or career goal, and I can explain suitable general pathways outside the catalog.';
+};
+const isUnusableRecommendationReply = (reply, programs) => {
+    const normalizedReply = normalize(reply);
+    if (includesAny(normalizedReply, ['insert program', 'program name here', '[program name', 'placeholder']))
+        return true;
+    if (programs.length > 0)
+        return false;
+    return programCatalog_1.PROGRAM_CATALOG.some(program => normalizedReply.includes(normalize(program.name)));
+};
 const buildCareerReply = (program, language) => {
     if (language === 'hi') {
         return `${program.name} के बाद करियर विकल्प: ${program.careerOpportunities.join(', ')}। अगर आपको ${program.fields.slice(0, 2).join(' और ')} पसंद है, तो यह अच्छा विकल्प है।`;
@@ -428,7 +675,6 @@ const buildOpinionReply = (program, userText, language) => {
     return `${program.name} is a good option for you if you like ${program.fields.slice(0, 2).join(' and ')}. The main requirement is: ${program.eligibility}.`;
 };
 const buildBestFitReply = (programs, userText, language) => {
-    const normalized = normalize(userText);
     const mathFriendly = programs.filter(program => includesAny(normalize(`${program.name} ${program.eligibility} ${program.fields.join(' ')}`), ['math', 'mathematics', 'data science', 'engineering', 'computer science', 'it']));
     const best = mathFriendly[0] || programs[0];
     const backup = mathFriendly.find(program => program.name !== best?.name);
@@ -504,6 +750,21 @@ const buildMasterPathReply = (language) => {
         return '12वीं के बाद आप सीधे मास्टर कोर्स नहीं कर सकते। पहले संबंधित बैचलर डिग्री पूरी करें, फिर मास्टर कोर्स के लिए आवेदन करें।';
     }
     return englishReply;
+};
+const buildMasterOptionsAfter12thReply = (language) => {
+    const masterOptions = programCatalog_1.PROGRAM_CATALOG
+        .filter(program => program.level === 'PG')
+        .slice(0, 6);
+    if (language === 'hi') {
+        return [
+            '12th ke baad direct master nahi hota; pehle relevant bachelor degree complete karni hogi.',
+            `Uske baad master options hain: ${masterOptions.map(program => program.name).join(', ')}.`,
+        ].join(' ');
+    }
+    return [
+        "You cannot start a master's directly after 12th; first complete a relevant bachelor's degree.",
+        `After that, master options include: ${masterOptions.map(program => program.name).join(', ')}.`,
+    ].join(' ');
 };
 const parseEligibilityJson = (rawResult) => {
     const cleaned = rawResult.replace(/```json\s*/gi, '').replace(/```\s*/g, '').trim();
@@ -646,7 +907,6 @@ const chatController = async (req, res) => {
         const safeHistory = Array.isArray(history) ? history : [];
         const cleanMessage = message.trim();
         const responseLanguage = detectResponseLanguage(cleanMessage, safeHistory);
-        const historyText = safeHistory.map(item => item.content).join(' ');
         const knowledgeHits = VectorKnowledgeService_1.default.search(cleanMessage);
         // ── Save program intent check ──────────────────────────────────────────
         if (isSaveIntent(cleanMessage)) {
@@ -686,13 +946,19 @@ const chatController = async (req, res) => {
             return;
         }
         // ── Direct program follow-up flow ─────────────────────────────────────
-        const programContext = resolveProgramFromConversation(cleanMessage, safeHistory);
+        const finalChoiceRequested = isFinalChoiceRequest(cleanMessage);
+        const finalizedProgram = finalChoiceRequested ? getBestRecommendedProgram(safeHistory) : null;
+        const programContext = finalizedProgram
+            ? { program: finalizedProgram, ambiguous: false }
+            : resolveProgramFromConversation(cleanMessage, safeHistory);
         if (programContext.program) {
             const reply = buildThoughtfulProgramReply(programContext.program, cleanMessage, safeHistory, responseLanguage, knowledgeHits);
             await sendResponse(res, cleanMessage, safeHistory, responseLanguage, {
                 reply,
                 responseLanguage,
-                responseType: 'detail',
+                responseType: isProgramSelectionIntent(cleanMessage) || finalChoiceRequested
+                    ? 'final_recommendation'
+                    : 'detail',
                 programs: [programContext.program],
                 knowledge: knowledgeHits.map(hit => hit.id),
             });
@@ -732,7 +998,7 @@ const chatController = async (req, res) => {
         // ── Analyze intent ─────────────────────────────────────────────────────
         let analysis = await GeminiService_1.default.analyzeConversation(cleanMessage, safeHistory);
         console.log('[ANALYSIS BEFORE PROCESSING]', JSON.stringify(analysis, null, 2));
-        // ── LOCAL EXTRACTION — Fill gaps in Gemini analysis ────────────────────
+        // ── LOCAL EXTRACTION — Fill gaps in AI analysis ────────────────────────
         const localData = extractProfileLocally(cleanMessage, safeHistory);
         const combinedText = normalize(cleanMessage);
         const combinedUserText = normalize(cleanMessage);
@@ -808,9 +1074,15 @@ const chatController = async (req, res) => {
         console.log('[ANALYSIS AFTER PROCESSING]', JSON.stringify(analysis, null, 2));
         // ── Course recommendation flow ─────────────────────────────────────────
         if (analysis?.topic === 'course' && analysis?.profile) {
-            if (requestedLevel === 'PG' && hasSchoolQualification(combinedUserText) && !hasBachelorQualification(combinedUserText)) {
+            const fullUserContext = `${safeHistory
+                .filter(item => item.role === 'user')
+                .map(item => item.content)
+                .join(' ')} ${cleanMessage}`;
+            if (requestedLevel === 'PG' && hasSchoolQualification(fullUserContext) && !hasBachelorQualification(fullUserContext)) {
                 await sendResponse(res, cleanMessage, safeHistory, responseLanguage, {
-                    reply: buildMasterPathReply(responseLanguage),
+                    reply: includesAny(combinedUserText, ['option', 'options', 'course', 'courses', 'kya kya', 'कौन', 'कौनसे'])
+                        ? buildMasterOptionsAfter12thReply(responseLanguage)
+                        : buildMasterPathReply(responseLanguage),
                     responseLanguage,
                     responseType: 'general',
                     rules: relevantRules.map(rule => rule.id),
@@ -839,28 +1111,33 @@ const chatController = async (req, res) => {
             // Have enough info — search catalog and explain matches
             const questionIntent = inferQuestionIntent(cleanMessage);
             const allPrograms = ProgramService_1.default.search({
-                qualification: `${analysis.profile.qualification || ''} ${combinedUserText}`,
+                qualification: `${analysis.profile.qualification || ''} ${fullUserContext}`,
                 gpa: analysis.profile.score || '',
                 interests: analysis.profile.field || '',
                 preferredCountry: analysis.profile.country || '',
                 targetLevel: requestedLevel || 'Any',
             });
+            const compatiblePrograms = selectCompatiblePrograms(allPrograms, analysis.profile.field || '', fullUserContext);
             const recentNames = getRecentlyRecommendedProgramNames(safeHistory);
             const programs = questionIntent === 'alternative'
-                ? allPrograms.filter(program => !recentNames.has(normalize(program.name)))
-                : allPrograms;
-            const reply = questionIntent === 'best_fit'
-                ? buildBestFitReply(programs.length ? programs : allPrograms, combinedUserText, responseLanguage)
-                : buildProgramRecommendationText(programs.length ? programs : allPrograms, responseLanguage, questionIntent === 'alternative'
-                    ? responseLanguage === 'hi'
-                        ? 'ये कुछ दूसरे अच्छे options हैं:'
-                        : 'Here are other good options from my catalog:'
-                    : undefined);
+                ? compatiblePrograms.filter(program => !recentNames.has(normalize(program.name)))
+                : compatiblePrograms;
+            const isFinalRecommendation = finalChoiceRequested && programs.length > 0;
+            const responsePrograms = isFinalRecommendation ? programs.slice(0, 1) : programs;
+            let reply = await GeminiService_1.default.chat(buildRecommendationPrompt(cleanMessage, analysis.profile, responsePrograms, responseLanguage), safeHistory.filter(item => item.role === 'user'), {
+                systemPrompt: `You are ARIA, a thoughtful AI admission counsellor. Reason from the full conversation and the student's latest correction. Catalog facts are authoritative for programs available in the app, while general educational guidance is allowed when clearly identified as outside the catalog.`,
+                temperature: 0.35,
+                maxOutputTokens: 420,
+                language: responseLanguage,
+            });
+            if (isUnusableRecommendationReply(reply, responsePrograms)) {
+                reply = buildNoCatalogMatchReply(analysis.profile.field || '', responseLanguage);
+            }
             await sendResponse(res, cleanMessage, safeHistory, responseLanguage, {
                 reply,
                 responseLanguage,
-                responseType: 'recommendation',
-                programs: programs.length ? programs : allPrograms,
+                responseType: isFinalRecommendation ? 'final_recommendation' : 'recommendation',
+                programs: responsePrograms,
                 rules: relevantRules.map(rule => rule.id),
                 knowledge: knowledgeHits.map(hit => hit.id),
             });
@@ -876,9 +1153,9 @@ const chatController = async (req, res) => {
     }
     catch (error) {
         console.error('[ChatController] Error:', error?.message || error);
-        // Gemini is offline or unreachable
+        // Ollama is offline or unreachable
         res.status(500).json({
-            reply: "I'm having trouble connecting to the AI. Please check your Gemini API key and network connection.",
+            reply: "I'm having trouble connecting to Ollama. Please check that the Ollama service is running and reachable.",
             timestamp: Date.now(),
         });
     }
@@ -891,15 +1168,23 @@ const programFinderController = async (req, res) => {
             res.status(400).json({ message: 'qualification and interests are required' });
             return;
         }
+        const userProfileAnalysis = await GeminiService_1.default.analyzeConversation(`Highest qualification: ${qualification}. GPA: ${gpa || 'not provided'}. Interests: ${interests}. Preferred country: ${preferredCountry || 'not provided'}`, []);
         const programs = ProgramService_1.default.search({
             qualification: qualification || '',
             gpa: gpa || '',
             interests: interests || '',
             preferredCountry: preferredCountry || '',
         });
-        const summary = await GeminiService_1.default.chat(`Summarize in ONE sentence why these programs suit a student with: qualification=${qualification}, interests=${interests}.
-Programs: ${JSON.stringify(programs.map(p => p.name))}`, [], { temperature: 0.2 });
-        res.json({ programs, summary, totalFound: programs.length, timestamp: Date.now() });
+        const summary = await GeminiService_1.default.chat(`You are ARIA. In one short sentence, explain why these programs fit the student's profile.
+Profile: ${JSON.stringify(userProfileAnalysis?.profile || {})}
+Programs: ${JSON.stringify(programs.map(p => ({ name: p.name, level: p.level, field: p.fields, country: p.country })))}`, [], { temperature: 0.2, maxOutputTokens: 80 });
+        res.json({
+            programs,
+            summary,
+            totalFound: programs.length,
+            suggestedLevel: userProfileAnalysis?.profile?.level || 'Any',
+            timestamp: Date.now(),
+        });
     }
     catch (error) {
         console.error('[ProgramFinderController] Error:', error?.message || error);

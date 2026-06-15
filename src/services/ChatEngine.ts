@@ -23,7 +23,7 @@ export interface ConversationMessage {
 export interface ChatEngineResponse {
   reply: string;
   responseLanguage: 'hi' | 'en';
-  responseType?: 'save_confirmation' | 'detail' | 'recommendation' | 'general';
+  responseType?: 'save_confirmation' | 'detail' | 'recommendation' | 'final_recommendation' | 'general';
   programs?: ProgramCatalogItem[];
   rules?: string[];
   knowledge?: string[];
@@ -38,6 +38,24 @@ const normalize = (text: string) =>
 
 const includesAny = (text: string, keywords: string[]) =>
   keywords.some(keyword => text.includes(keyword));
+
+const isFinalChoiceRequest = (text: string): boolean => {
+  const normalized = normalize(text);
+  return /\b(?:choose|select|finali[sz]e)\b[\s\S]*\b(?:one|course|program)\b/i.test(normalized) || includesAny(normalized, [
+    'best one',
+    'one best',
+    'final course',
+    'final program',
+    'choose one',
+    'select one',
+    'which should i choose',
+    'which one should i choose',
+    'which should i go with',
+    'which one is best for me',
+    'mere liye best one',
+    'ek best course',
+  ]);
+};
 
 const inferQuestionIntent = (text: string): QuestionIntent => {
   const normalized = normalize(text);
@@ -115,6 +133,42 @@ const inferLevel = (text: string): 'UG' | 'PG' | 'Diploma' | 'Any' => {
   return 'Any';
 };
 
+const extractFieldFromText = (text: string): string => {
+  const normalized = normalize(text);
+  // IMPORTANT: Check multi-word phrases FIRST before single-word matches
+  // "data science" must be checked BEFORE "computer"/"science" individually
+  if (includesAny(normalized, ['data science', 'डेटा साइंस', 'डाटा साइंस'])) {
+    return 'data science';
+  }
+  if (includesAny(normalized, ['cyber security', 'cybersecurity', 'साइबर सिक्योरिटी'])) {
+    return 'cyber security';
+  }
+  if (includesAny(normalized, ['computer science', 'कंप्यूटर साइंस', 'कम्प्यूटर साइंस'])) {
+    return 'computer science';
+  }
+  // Now check single-word matches (these are less specific)
+  if (includesAny(normalized, ['computer', 'cs', 'software', 'कंप्यूटर', 'सीएस', 'सॉफ्टवेयर'])) {
+    return 'computer science';
+  }
+  if (includesAny(normalized, ['data', 'analytics', 'डेटा', 'एनालिटिक्स'])) {
+    return 'data science';
+  }
+  if (includesAny(normalized, ['engineering', 'engineer', 'इंजीनियर'])) {
+    return 'engineering';
+  }
+  if (includesAny(normalized, ['business', 'commerce', 'management', 'mba', 'बिजनेस', 'कॉमर्स'])) {
+    return 'business';
+  }
+  if (includesAny(normalized, ['healthcare', 'health', 'medical', 'nurse', 'हेल्थ', 'मेडिकल'])) {
+    return 'healthcare';
+  }
+  // Don't match 'it' alone — too ambiguous (matches common English word "it")
+  if (includesAny(normalized, ['information technology', 'आईटी'])) {
+    return 'computer science';
+  }
+  return '';
+};
+
 const extractProfileLocally = (message: string, history: ConversationMessage[]) => {
   const fullText = `${history.filter(h => h.role === 'user').map(h => h.content).join(' ')} ${message}`;
   const normalized = normalize(fullText);
@@ -136,18 +190,13 @@ const extractProfileLocally = (message: string, history: ConversationMessage[]) 
     level = 'Diploma';
   }
   
-  // Extract field
-  let field = '';
-  if (includesAny(normalized, ['computer', 'cs', 'it', 'software', 'कंप्यूटर', 'सीएस', 'आईटी', 'सॉफ्टवेयर'])) {
-    field = 'computer science';
-  } else if (includesAny(normalized, ['data science', 'data', 'analytics', 'डेटा', 'एनालिटिक्स'])) {
-    field = 'data science';
-  } else if (includesAny(normalized, ['engineering', 'engineer', 'इंजीनियर'])) {
-    field = 'engineering';
-  } else if (includesAny(normalized, ['business', 'commerce', 'management', 'mba', 'बिजनेस', 'कॉमर्स'])) {
-    field = 'business';
-  } else if (includesAny(normalized, ['healthcare', 'health', 'medical', 'nurse', 'हेल्थ', 'मेडिकल'])) {
-    field = 'healthcare';
+  // Extract field — prioritize the LATEST user message over full history.
+  // This ensures that if user changed their mind from "computer" to "data science",
+  // the latest intent wins.
+  let field = extractFieldFromText(message);
+  if (!field) {
+    // Fall back to checking full conversation history
+    field = extractFieldFromText(fullText);
   }
   
   // Extract score
@@ -159,16 +208,126 @@ const extractProfileLocally = (message: string, history: ConversationMessage[]) 
 
 const containsDevanagari = (message: string) => /[\u0900-\u097F]/.test(message);
 
-const detectResponseLanguage = (message: string, _history: ConversationMessage[]): 'en' | 'hi' => {
+// ─── Comprehensive Hinglish (Romanized Hindi) Detection ──────────────────────
+const HINDI_WORDS = new Set([
+  // Pronouns & common subjects
+  'maine', 'mujhe', 'mujhko', 'mera', 'meri', 'mere', 'hum', 'humko', 'humne', 'hamara', 'hamari',
+  'tum', 'tumne', 'tumko', 'tumhara', 'tumhari', 'aap', 'aapka', 'aapki', 'aapne', 'aapko',
+  'uska', 'uski', 'unka', 'unki', 'unko', 'isko', 'iski', 'usse',
+  // Verbs & verb forms
+  'hai', 'hain', 'tha', 'thi', 'the', 'hoga', 'hogi', 'hota', 'hoti',
+  'kar', 'karo', 'karna', 'karunga', 'karungi', 'karenge', 'karte', 'karti', 'kiya', 'kiye', 'karke',
+  'liya', 'liye', 'lena', 'lete', 'leti', 'lelo', 'lijiye',
+  'diya', 'diye', 'dena', 'dete', 'deti', 'dedo', 'dijiye', 'do',
+  'raha', 'rahi', 'rahe', 'rahega', 'rahegi', 'rahenge',
+  'sakta', 'sakti', 'sakte', 'sakenge',
+  'chahiye', 'chahte', 'chahti', 'chahunga', 'chahungi',
+  'bata', 'batao', 'bataye', 'bataiye', 'batana', 'batado',
+  'padh', 'padha', 'padhi', 'padhna', 'padhke', 'padhta', 'padhti', 'padhai',
+  'chalu', 'shuru',
+  'milega', 'milegi', 'milenge', 'milta', 'milti',
+  'lagta', 'lagti', 'lagte', 'lagega',
+  'bolna', 'bolo', 'bola', 'boli',
+  'jaana', 'jao', 'jata', 'jati', 'jayega', 'jayegi',
+  'aana', 'aao', 'aata', 'aati', 'aayega', 'aayegi',
+  'dekho', 'dekhna', 'dekhte', 'dekha', 'dekhi',
+  'samjha', 'samjho', 'samjhao', 'samajh',
+  'pasand', 'pasandida',
+  // Question words
+  'kya', 'kaise', 'kaisa', 'kaisi', 'kyu', 'kyun', 'kyunki', 'kaha', 'kahan',
+  'kaun', 'kaun-sa', 'kaunsa', 'kitna', 'kitni', 'kitne', 'kidhar', 'kab',
+  'konsa', 'konsi', 'kon',
+  // Connectors & prepositions
+  'ka', 'ki', 'ke', 'ko', 'se', 'mein', 'me', 'par', 'pe', 'tak', 'wala', 'wali', 'wale',
+  'aur', 'ya', 'lekin', 'magar', 'phir', 'toh', 'to', 'bhi',
+  'ke bare', 'ke baare', 'ke liye', 'ke saath',
+  'abhi', 'ab', 'jab', 'tab',
+  // Common nouns & adjectives
+  'accha', 'achha', 'acha', 'achhi', 'achi',
+  'theek', 'thik', 'sahi',
+  'bahut', 'bohot', 'bohut', 'zyada', 'jyada',
+  'kuch', 'kuchh', 'koi', 'sab', 'sabhi',
+  'nahi', 'nahin', 'nhi', 'mat', 'na',
+  'haan', 'han', 'ji', 'bilkul',
+  'padhai', 'padhai', 'course', 'kaam',
+  'dost', 'bhai', 'behen',
+  'paisa', 'paise', 'rupaye',
+  'saal', 'mahina', 'din',
+  'baad', 'pehle', 'pahle',
+  'saath', 'sath',
+  'jaruri', 'zaroori', 'zaruri',
+  'dusra', 'dusri', 'doosra', 'doosri',
+  // Education-related Hinglish
+  'padhai', 'padhna', 'padhke', 'padhta',
+  'pass', 'paas',
+  'barahvi', 'dasvi',
+  'wahan', 'yahan', 'idhar', 'udhar',
+  // Common phrases used as single words
+  'suno', 'suniye', 'sunte',
+  'chalo', 'chaliye', 'chalega',
+  'pata', 'maloom',
+  'theek', 'shukriya', 'dhanyawad', 'dhanyavaad',
+]);
+
+// Common Hinglish bigrams — if user text has 2+ of these, it's Hindi
+const HINDI_BIGRAMS = [
+  'kar liya', 'kar diya', 'kar do', 'kar raha', 'kar rahi',
+  'pass kiya', 'pass kar', 'pass ki',
+  'ke bare', 'ke baare', 'ke liye', 'ke saath', 'ke baad',
+  'mein pass', 'mein padha', 'mein kiya',
+  'kya hai', 'kaisa hai', 'kaisi hai', 'kaisa rahega', 'kaisa hoga',
+  'batao na', 'bata do', 'bata dijiye',
+  'mujhe batao', 'mujhe bata', 'mujhe chahiye',
+  'kuch aur', 'kuchh aur', 'aur batao', 'aur kuch',
+  'mere liye', 'mere pass', 'mere paas',
+  'mai ne', 'mein ne',
+  'save karo', 'save kar',
+];
+
+const detectHinglish = (text: string): boolean => {
+  const normalized = normalize(text);
+  const words = normalized.split(/\s+/);
+  
+  // Check for Hindi bigrams
+  const bigramCount = HINDI_BIGRAMS.filter(bg => normalized.includes(bg)).length;
+  if (bigramCount >= 1) return true;
+  
+  // Count how many words are Hindi
+  let hindiWordCount = 0;
+  for (const word of words) {
+    if (HINDI_WORDS.has(word)) {
+      hindiWordCount++;
+    }
+  }
+  
+  // If 2+ Hindi words found in a short message, or 30%+ Hindi words in a longer message
+  if (words.length <= 5 && hindiWordCount >= 2) return true;
+  if (words.length > 5 && hindiWordCount >= 3) return true;
+  if (words.length > 0 && hindiWordCount / words.length >= 0.3) return true;
+  
+  return false;
+};
+
+const detectResponseLanguage = (message: string, history: ConversationMessage[]): 'en' | 'hi' => {
+  // 1. Devanagari script → definitely Hindi
   if (containsDevanagari(message)) return 'hi';
 
-  const normalized = normalize(message);
-  const hindiIndicators = [
-    ' mujhe ', ' kya ', ' kaise ', ' kyu ', ' kyun ', ' batao ', ' chahiye ',
-    ' karna ', ' kaun ', ' kis ', ' aap ', ' hai ', ' hain ', ' aapka ', ' mere '
-  ];
-  if (hindiIndicators.some(indicator => normalized.includes(indicator))) {
-    return 'hi';
+  // 2. Romanized Hindi / Hinglish detection
+  if (detectHinglish(message)) return 'hi';
+  
+  // 3. Check conversation continuity — if the last 2 messages were in Hindi,
+  //    continue in Hindi even if current message is ambiguous
+  const recentAssistant = history.filter(m => m.role === 'assistant').slice(-2);
+  const recentHindi = recentAssistant.filter(m => {
+    // Check if assistant previously responded in Hindi  
+    return containsDevanagari(m.content);
+  });
+  if (recentHindi.length >= 1) {
+    // If recent conversation was Hindi and current message has any Hindi words
+    const normalized = normalize(message);
+    const words = normalized.split(/\s+/);
+    const anyHindiWord = words.some(w => HINDI_WORDS.has(w));
+    if (anyHindiWord) return 'hi';
   }
   
   return 'en';
@@ -299,14 +458,19 @@ export const findProgramMentions = (text: string): ProgramCatalogItem[] => {
     }
   });
   
-  // If no exact matches, try partial matching
+  // If no exact matches, try partial matching — but require at least one
+  // FIELD-SPECIFIC word to match (not just generic words like "bachelor", "master",
+  // "science", "of", etc.) to avoid cross-pollination between programs.
   if (matches.length === 0) {
+    const genericWords = new Set(['bachelor', 'master', 'diploma', 'science', 'of', 'in', 'the', 'and', 'for', 'engineering', 'postgraduate']);
     PROGRAM_CATALOG.forEach(program => {
       const programWords = normalize(program.name).split(' ');
-      const textHasMultipleWords = programWords.filter(word => 
-        word.length > 3 && normalized.includes(word)
-      ).length >= 2;
-      if (textHasMultipleWords) {
+      const matchingWords = programWords.filter(word => 
+        word.length > 2 && normalized.includes(word)
+      );
+      const hasFieldSpecificMatch = matchingWords.some(word => !genericWords.has(word));
+      // Require at least 2 matching words AND at least one must be field-specific
+      if (matchingWords.length >= 2 && hasFieldSpecificMatch) {
         matches.push(program);
       }
     });
@@ -387,6 +551,19 @@ const getLastRecommendedProgram = (history: ConversationMessage[]): ProgramCatal
     }
   }
 
+  return null;
+};
+
+const getBestRecommendedProgram = (history: ConversationMessage[]): ProgramCatalogItem | null => {
+  for (let i = history.length - 1; i >= 0; i--) {
+    const programs = history[i].programs;
+    if (!programs?.length) continue;
+
+    const best = [...programs].sort(
+      (a, b) => ((b as any).matchScore || 0) - ((a as any).matchScore || 0),
+    )[0];
+    return getCatalogProgramByName(best.name) || (best as unknown as ProgramCatalogItem);
+  }
   return null;
 };
 
@@ -474,6 +651,13 @@ const resolveProgramFromConversation = (
   const keywordMatch = resolveProgramFromKeywords(message);
   if (keywordMatch) {
     return { program: keywordMatch, ambiguous: false };
+  }
+
+  if (isFinalChoiceRequest(message)) {
+    const bestRecommended = getBestRecommendedProgram(history);
+    if (bestRecommended) {
+      return { program: bestRecommended, ambiguous: false };
+    }
   }
 
   if (isFollowUpProgramQuestion(message) && !hasFreshQualificationSignal(message)) {
@@ -654,6 +838,24 @@ const buildMasterPathReply = (language: 'en' | 'hi') => {
   return englishReply;
 };
 
+const buildMasterOptionsAfter12thReply = (language: 'en' | 'hi') => {
+  const masterOptions = PROGRAM_CATALOG
+    .filter(program => program.level === 'PG')
+    .slice(0, 6);
+
+  if (language === 'hi') {
+    return [
+      '12th ke baad direct master nahi hota; pehle relevant bachelor degree complete karni hogi.',
+      `Uske baad master options hain: ${masterOptions.map(program => program.name).join(', ')}.`,
+    ].join(' ');
+  }
+
+  return [
+    "You cannot start a master's directly after 12th; first complete a relevant bachelor's degree.",
+    `After that, master options include: ${masterOptions.map(program => program.name).join(', ')}.`,
+  ].join(' ');
+};
+
 const isDuplicateReply = (reply: string, history: ConversationMessage[]): boolean => {
   const assistantMessages = history.filter(m => m.role === 'assistant');
   if (assistantMessages.length === 0) return false;
@@ -679,7 +881,32 @@ export const processChat = async (
 
   // 1. Save program intent check
   if (isSaveIntent(cleanMessage)) {
-    const programToSave = findProgramMentions(cleanMessage)[0] || findProgramMentions(safeHistory.map(m => m.content).join(' '))[0];
+    // 1a. Check if the save message itself mentions a specific program
+    let programToSave = findProgramMentions(cleanMessage)[0] || null;
+    
+    // 1b. Check the most recent assistant message with attached programs
+    if (!programToSave) {
+      for (let i = safeHistory.length - 1; i >= 0; i--) {
+        const msg = safeHistory[i];
+        if (msg.role === 'assistant' && msg.programs?.length) {
+          const catalogMatch = findProgramMentions(msg.programs[0].name)[0];
+          programToSave = catalogMatch || (msg.programs[0] as unknown as ProgramCatalogItem);
+          break;
+        }
+      }
+    }
+    
+    // 1c. Search recent messages in reverse order (newest first)
+    if (!programToSave) {
+      for (let i = safeHistory.length - 1; i >= 0; i--) {
+        const found = findProgramMentions(safeHistory[i].content)[0];
+        if (found) {
+          programToSave = found;
+          break;
+        }
+      }
+    }
+    
     if (programToSave) {
       const reply = responseLanguage === 'hi'
         ? `${programToSave.name} आपके saved programs में जोड़ दिया गया है.`
@@ -800,9 +1027,16 @@ YOUR TASK:
   if (analysis.topic === 'course' && analysis.profile) {
 
     // Edge-case: 12th student asking for PG
-    if (requestedLevel === 'PG' && hasSchoolQualification(combinedUserText) && !hasBachelorQualification(combinedUserText)) {
+    const fullUserContext = `${safeHistory
+      .filter(item => item.role === 'user')
+      .map(item => item.content)
+      .join(' ')} ${cleanMessage}`;
+
+    if (requestedLevel === 'PG' && hasSchoolQualification(fullUserContext) && !hasBachelorQualification(fullUserContext)) {
       return {
-        reply: buildMasterPathReply(responseLanguage),
+        reply: includesAny(combinedUserText, ['option', 'options', 'course', 'courses', 'kya kya', 'कौन', 'कौनसे'])
+          ? buildMasterOptionsAfter12thReply(responseLanguage)
+          : buildMasterPathReply(responseLanguage),
         responseLanguage,
         responseType: 'general',
         rules: relevantRules.map(rule => rule.id),
@@ -847,11 +1081,13 @@ YOUR TASK:
       : allPrograms;
 
     const topPrograms = (filteredPrograms.length ? filteredPrograms : allPrograms).slice(0, 5);
+    const isFinalRecommendation = isFinalChoiceRequest(cleanMessage) && topPrograms.length > 0;
+    const responsePrograms = isFinalRecommendation ? topPrograms.slice(0, 1) : topPrograms;
 
 
     // Build a catalog context string for Gemini
-    const catalogContext = topPrograms.length
-      ? topPrograms
+    const catalogContext = responsePrograms.length
+      ? responsePrograms
           .map(p => `• ${p.name} | ${p.university}, ${p.country} | ${p.duration} | Intake: ${p.intake} | Eligibility: ${p.eligibility} | Careers: ${p.careerOpportunities.slice(0, 2).join(', ')}`)
           .join('\n')
       : 'No close matches found in catalog. Advise generally based on your knowledge.';
@@ -891,8 +1127,8 @@ INSTRUCTIONS:
     return {
       reply: finalReply,
       responseLanguage,
-      responseType: 'recommendation',
-      programs: topPrograms,
+      responseType: isFinalRecommendation ? 'final_recommendation' : 'recommendation',
+      programs: responsePrograms,
       rules: relevantRules.map(rule => rule.id),
       knowledge: knowledgeHits.map(hit => hit.id),
       timestamp: Date.now(),

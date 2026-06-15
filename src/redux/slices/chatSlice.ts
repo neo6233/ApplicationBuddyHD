@@ -2,7 +2,7 @@ import {createAsyncThunk, createSlice, PayloadAction} from '@reduxjs/toolkit';
 import {Message, ChatRequest, ChatResponse} from '../../models/ChatModel';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import uuid from 'react-native-uuid';
-import {processChat} from '../../services/ChatEngine';
+import ChatApi from '../../services/ChatApi';
 import {PROGRAM_CATALOG} from '../../data/programCatalog';
 
 const uuidv4 = () => uuid.v4() as string;
@@ -37,7 +37,7 @@ export const loadChatHistory = createAsyncThunk('chat/loadHistory', async () => 
   }
 });
 
-// ─── Send message via local ChatEngine (direct Gemini API) ───────────────────
+// ─── Send message via backend Chat API ───────────────────────────────────────
 export const sendMessage = createAsyncThunk(
   'chat/sendMessage',
   async (
@@ -52,7 +52,11 @@ export const sendMessage = createAsyncThunk(
         programs: m.programs,
       }));
 
-      const result = await processChat(userMessage, directHistory, image);
+      const result = await ChatApi.sendMessage({
+        message: userMessage,
+        history: directHistory,
+        image: image || null,
+      });
 
       if (!result?.reply) {
         return rejectWithValue('No response received from AI service');
@@ -75,7 +79,7 @@ export const sendMessage = createAsyncThunk(
         timestamp: result.timestamp ?? Date.now(),
       };
     } catch (error: any) {
-      console.error('Chat processing failed:', error?.message || error);
+      console.warn('Chat processing failed:', error?.message || error);
       return rejectWithValue(error?.message || 'Failed to process message');
     }
   },
@@ -122,7 +126,7 @@ const chatSlice = createSlice({
       action: PayloadAction<{
         content: string;
         responseLanguage?: 'hi' | 'en';
-        responseType?: 'recommendation' | 'detail' | 'general';
+        responseType?: 'recommendation' | 'final_recommendation' | 'detail' | 'general';
         programs?: Message['programs'];
         timestamp?: number;
       }>,

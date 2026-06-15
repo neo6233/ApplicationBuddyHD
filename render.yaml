@@ -11,13 +11,11 @@ services:
         value: production
       - key: PORT
         value: 5000
-      - key: GEMINI_API_KEY
-        sync: false
-      - key: GEMINI_MODEL
-        value: gemini-2.5-flash
-      - key: GEMINI_BASE_URL
-        value: https://generativelanguage.googleapis.com/v1beta
-      - key: GEMINI_TIMEOUT_MS
-        value: 12000
+      - key: OLLAMA_BASE_URL
+        value: http://127.0.0.1:11434
+      - key: OLLAMA_MODEL
+        value: gemma3:4b
+      - key: OLLAMA_TIMEOUT_MS
+        value: 30000
       - key: CORS_ORIGIN
         sync: false

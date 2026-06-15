@@ -3,7 +3,7 @@
   "version": "0.0.1",
   "private": true,
   "scripts": {
-    "android": "react-native run-android",
+    "android": "for device in $(adb devices | awk '$2==\"device\" && $1 !~ /^emulator-/ {print $1}'); do adb -s \"$device\" reverse tcp:5000 tcp:5000 >/dev/null 2>&1 || true; adb -s \"$device\" reverse tcp:11434 tcp:11434 >/dev/null 2>&1 || true; done && react-native run-android",
     "ios": "react-native run-ios",
     "lint": "eslint .",
     "start": "react-native start",

@@ -7,7 +7,7 @@ export interface Message {
   image?: string | null;
   inputMode?: 'voice' | 'text';
   responseLanguage?: 'hi' | 'en';
-  responseType?: 'recommendation' | 'detail' | 'general' | 'save_confirmation';
+  responseType?: 'recommendation' | 'final_recommendation' | 'detail' | 'general' | 'save_confirmation';
   programs?: Array<{
     name: string;
     university: string;
@@ -37,7 +37,7 @@ export interface ChatResponse {
   reply: string;
   timestamp: number;
   responseLanguage?: 'hi' | 'en';
-  responseType?: 'recommendation' | 'detail' | 'general' | 'save_confirmation';
+  responseType?: 'recommendation' | 'final_recommendation' | 'detail' | 'general' | 'save_confirmation';
   programs?: Array<{
     name: string;
     university: string;

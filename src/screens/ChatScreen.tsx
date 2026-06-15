@@ -10,6 +10,7 @@ import {
   Platform,
   Alert,
   StatusBar,
+  Image,
 } from 'react-native';
 import {NativeStackNavigationProp} from '@react-navigation/native-stack';
 import {RootStackParamList} from '../navigation/AppNavigator';
@@ -195,8 +196,32 @@ useEffect(() => {
 
     if (isSaveIntent(text)) {
       const detectedLanguage: 'hi' | 'en' = /[\u0900-\u097F]/.test(text) ? 'hi' : 'en';
-      const textHistory = historyForSend.map(m => m.content).join(' ');
-      const programToSave = findProgramFromText(text) || findProgramFromText(textHistory);
+      
+      // 1. First check if the save message itself mentions a specific program
+      let programToSave = findProgramFromText(text);
+      
+      // 2. If not, check the most recent assistant message with attached programs
+      //    (this is the most reliable signal of what was being discussed)
+      if (!programToSave) {
+        for (let i = historyForSend.length - 1; i >= 0; i--) {
+          const msg = historyForSend[i];
+          if (msg.role === 'assistant' && msg.programs?.length) {
+            programToSave = findProgramFromText(msg.programs[0].name) || (msg.programs[0] as any);
+            break;
+          }
+        }
+      }
+      
+      // 3. If still not found, search recent messages in reverse order (newest first)
+      if (!programToSave) {
+        for (let i = historyForSend.length - 1; i >= 0; i--) {
+          const found = findProgramFromText(historyForSend[i].content);
+          if (found) {
+            programToSave = found;
+            break;
+          }
+        }
+      }
 
       if (programToSave) {
         await dispatch(saveProgram({...programToSave, matchScore: 0} as unknown as Program));
@@ -389,6 +414,29 @@ useEffect(() => {
           onContentSizeChange={scrollToBottom}
         />
 
+        {userImage ? (
+          <View style={styles.attachmentPreviewCard}>
+            <View style={styles.attachmentPreviewHeader}>
+              <Text style={styles.attachmentPreviewLabel}>Image ready to send</Text>
+              <TouchableOpacity
+                style={styles.attachmentPreviewCloseButton}
+                onPress={clearPendingImage}
+                activeOpacity={0.8}>
+                <Text style={styles.attachmentPreviewCloseIcon}>✕</Text>
+              </TouchableOpacity>
+            </View>
+            <Image
+              source={{
+                uri: userImage.startsWith('data:')
+                  ? userImage
+                  : `data:image/jpeg;base64,${userImage}`,
+              }}
+              style={styles.attachmentPreviewImage}
+              resizeMode="cover"
+            />
+          </View>
+        ) : null}
+
         {/* Input Bar */}
         <View style={styles.inputBar}>
           <TextInput
@@ -509,6 +557,47 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     lineHeight: 22,
     marginBottom: 20,
+  },
+  attachmentPreviewCard: {
+    marginHorizontal: 16,
+    marginBottom: 10,
+    padding: 12,
+    borderRadius: 20,
+    backgroundColor: Colors.surfaceElevated,
+    borderWidth: 1,
+    borderColor: Colors.border,
+  },
+  attachmentPreviewHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 10,
+  },
+  attachmentPreviewLabel: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: Colors.textPrimary,
+  },
+  attachmentPreviewCloseButton: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: Colors.inputBackground,
+    borderWidth: 1,
+    borderColor: Colors.border,
+  },
+  attachmentPreviewCloseIcon: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: Colors.textPrimary,
+  },
+  attachmentPreviewImage: {
+    width: '100%',
+    height: 180,
+    borderRadius: 16,
+    backgroundColor: Colors.background,
   },
   suggestionsRow: {
     flexDirection: 'row',

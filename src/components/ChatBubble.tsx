@@ -15,7 +15,8 @@ const ChatBubble: React.FC<ChatBubbleProps> = ({message, onSaveProgram, isProgra
   const primaryProgram = message.programs?.[0];
   const showSaveAction = Boolean(
     !isUser &&
-      message.responseType === 'recommendation' &&
+      message.responseType === 'final_recommendation' &&
+      message.programs?.length === 1 &&
       primaryProgram &&
       onSaveProgram,
   );

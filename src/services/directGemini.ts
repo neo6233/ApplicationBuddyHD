@@ -1,27 +1,142 @@
 import { PROGRAM_CATALOG } from '../data/programCatalog';
 import { APP_RULES } from '../data/appRules';
+import {resolveLocalServiceUrl} from '../config/serviceUrl';
 
 // ─── Config ──────────────────────────────────────────────────────────────────
-const GEMINI_API_KEY =
-  (typeof process !== 'undefined' &&
-    ((process as any)?.env?.GEMINI_API_KEY || (process as any)?.env?.GOOGLE_API_KEY)) ||
-  '';
+const OLLAMA_BASE_URL = resolveLocalServiceUrl({
+  envKeys: ['OLLAMA_BASE_URL', 'OLLAMA_HOST'],
+  port: 11434,
+  path: '',
+});
 
-const GEMINI_MODEL =
-  (typeof process !== 'undefined' && (process as any)?.env?.GEMINI_MODEL) || 'gemini-2.5-flash';
+const OLLAMA_MODEL =
+  (typeof process !== 'undefined' && (process as any)?.env?.OLLAMA_MODEL) || 'gemma3:4b';
 
-const GEMINI_BASE_URL =
-  (typeof process !== 'undefined' && (process as any)?.env?.GEMINI_BASE_URL) ||
-  'https://generativelanguage.googleapis.com/v1beta';
-
-const GEMINI_TIMEOUT_MS = Number(
-  (typeof process !== 'undefined' && (process as any)?.env?.GEMINI_TIMEOUT_MS) || 15000,
+const OLLAMA_TIMEOUT_MS = Number(
+  (typeof process !== 'undefined' && (process as any)?.env?.OLLAMA_TIMEOUT_MS) || 30000,
 );
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 const normalize = (text: string) => text.toLowerCase().replace(/\s+/g, ' ').trim();
 
 const containsDevanagari = (text: string) => /[\u0900-\u097F]/.test(text);
+
+// ─── Comprehensive Hinglish (Romanized Hindi) Detection ──────────────────────
+const HINDI_WORDS = new Set([
+  // Pronouns & common subjects
+  'maine', 'mujhe', 'mujhko', 'mera', 'meri', 'mere', 'hum', 'humko', 'humne', 'hamara', 'hamari',
+  'tum', 'tumne', 'tumko', 'tumhara', 'tumhari', 'aap', 'aapka', 'aapki', 'aapne', 'aapko',
+  'uska', 'uski', 'unka', 'unki', 'unko', 'isko', 'iski', 'usse',
+  // Verbs & verb forms
+  'hai', 'hain', 'tha', 'thi', 'the', 'hoga', 'hogi', 'hota', 'hoti',
+  'kar', 'karo', 'karna', 'karunga', 'karungi', 'karenge', 'karte', 'karti', 'kiya', 'kiye', 'karke',
+  'liya', 'liye', 'lena', 'lete', 'leti', 'lelo', 'lijiye',
+  'diya', 'diye', 'dena', 'dete', 'deti', 'dedo', 'dijiye', 'do',
+  'raha', 'rahi', 'rahe', 'rahega', 'rahegi', 'rahenge',
+  'sakta', 'sakti', 'sakte', 'sakenge',
+  'chahiye', 'chahte', 'chahti', 'chahunga', 'chahungi',
+  'bata', 'batao', 'bataye', 'bataiye', 'batana', 'batado',
+  'padh', 'padha', 'padhi', 'padhna', 'padhke', 'padhta', 'padhti', 'padhai',
+  'chalu', 'shuru',
+  'milega', 'milegi', 'milenge', 'milta', 'milti',
+  'lagta', 'lagti', 'lagte', 'lagega',
+  'bolna', 'bolo', 'bola', 'boli',
+  'jaana', 'jao', 'jata', 'jati', 'jayega', 'jayegi',
+  'aana', 'aao', 'aata', 'aati', 'aayega', 'aayegi',
+  'dekho', 'dekhna', 'dekhte', 'dekha', 'dekhi',
+  'samjha', 'samjho', 'samjhao', 'samajh',
+  'pasand', 'pasandida',
+  // Question words
+  'kya', 'kaise', 'kaisa', 'kaisi', 'kyu', 'kyun', 'kyunki', 'kaha', 'kahan',
+  'kaun', 'kaun-sa', 'kaunsa', 'kitna', 'kitni', 'kitne', 'kidhar', 'kab',
+  'konsa', 'konsi', 'kon',
+  // Connectors & prepositions
+  'ka', 'ki', 'ke', 'ko', 'se', 'mein', 'me', 'par', 'pe', 'tak', 'wala', 'wali', 'wale',
+  'aur', 'ya', 'lekin', 'magar', 'phir', 'toh', 'to', 'bhi',
+  'ke bare', 'ke baare', 'ke liye', 'ke saath',
+  'abhi', 'ab', 'jab', 'tab',
+  // Common nouns & adjectives
+  'accha', 'achha', 'acha', 'achhi', 'achi',
+  'theek', 'thik', 'sahi',
+  'bahut', 'bohot', 'bohut', 'zyada', 'jyada',
+  'kuch', 'kuchh', 'koi', 'sab', 'sabhi',
+  'nahi', 'nahin', 'nhi', 'mat', 'na',
+  'haan', 'han', 'ji', 'bilkul',
+  'padhai', 'course', 'kaam',
+  'dost', 'bhai', 'behen',
+  'paisa', 'paise', 'rupaye',
+  'saal', 'mahina', 'din',
+  'baad', 'pehle', 'pahle',
+  'saath', 'sath',
+  'jaruri', 'zaroori', 'zaruri',
+  'dusra', 'dusri', 'doosra', 'doosri',
+  // Education-related Hinglish
+  'padhna', 'padhke', 'padhta',
+  'pass', 'paas',
+  'barahvi', 'dasvi',
+  'wahan', 'yahan', 'idhar', 'udhar',
+  // Common phrases used as single words
+  'suno', 'suniye', 'sunte',
+  'chalo', 'chaliye', 'chalega',
+  'pata', 'maloom',
+  'shukriya', 'dhanyawad', 'dhanyavaad',
+]);
+
+const HINDI_BIGRAMS = [
+  'kar liya', 'kar diya', 'kar do', 'kar raha', 'kar rahi',
+  'pass kiya', 'pass kar', 'pass ki',
+  'ke bare', 'ke baare', 'ke liye', 'ke saath', 'ke baad',
+  'mein pass', 'mein padha', 'mein kiya',
+  'kya hai', 'kaisa hai', 'kaisi hai', 'kaisa rahega', 'kaisa hoga',
+  'batao na', 'bata do', 'bata dijiye',
+  'mujhe batao', 'mujhe bata', 'mujhe chahiye',
+  'kuch aur', 'kuchh aur', 'aur batao', 'aur kuch',
+  'mere liye', 'mere pass', 'mere paas',
+  'mai ne', 'mein ne',
+  'save karo', 'save kar',
+];
+
+const detectHinglish = (text: string): boolean => {
+  const normalized = normalize(text);
+  const words = normalized.split(/\s+/);
+  
+  const bigramCount = HINDI_BIGRAMS.filter(bg => normalized.includes(bg)).length;
+  if (bigramCount >= 1) return true;
+  
+  let hindiWordCount = 0;
+  for (const word of words) {
+    if (HINDI_WORDS.has(word)) {
+      hindiWordCount++;
+    }
+  }
+  
+  if (words.length <= 5 && hindiWordCount >= 2) return true;
+  if (words.length > 5 && hindiWordCount >= 3) return true;
+  if (words.length > 0 && hindiWordCount / words.length >= 0.3) return true;
+  
+  return false;
+};
+
+const detectResponseLanguage = (
+  message: string,
+  history: Array<{ role: 'user' | 'assistant'; content: string; image?: string | null }>
+): 'en' | 'hi' => {
+  if (containsDevanagari(message)) return 'hi';
+  if (detectHinglish(message)) return 'hi';
+  
+  const recentAssistant = history.filter(m => m.role === 'assistant').slice(-2);
+  const recentHindi = recentAssistant.filter(m => {
+    return containsDevanagari(m.content);
+  });
+  if (recentHindi.length >= 1) {
+    const normalized = normalize(message);
+    const words = normalized.split(/\s+/);
+    const anyHindiWord = words.some(w => HINDI_WORDS.has(w));
+    if (anyHindiWord) return 'hi';
+  }
+  
+  return 'en';
+};
 
 export interface AssistantAnalysis {
   topic: 'course' | 'eligibility' | 'scholarship' | 'visa' | 'general';
@@ -59,7 +174,7 @@ CRITICAL BEHAVIOR RULES:
 3. If the student has shared their education level/field, use that to FILTER and REASON over programs — do not list everything.
 4. If the student asks a follow-up, continue the conversation intelligently based on prior context.
 5. Keep responses concise: 2–4 sentences or a focused list of 2–3 items maximum.
-6. If the student speaks Hindi, reply ONLY in Hindi. If English, reply ONLY in English.
+6. If the student speaks Hindi or Hinglish, reply in Hindi/Hinglish (a natural mix of Hindi and English). If English, reply ONLY in English.
 7. NEVER repeat the same response twice in a conversation.
 8. For program recommendations — use ONLY programs from this catalog. NEVER invent programs.
 9. If a user asks about ONE specific program, give details about THAT program only.
@@ -77,10 +192,10 @@ ${catalogSnapshot}`;
 
 const buildLanguageInstruction = (language: 'hi' | 'en'): string =>
   language === 'hi'
-    ? '\u0906\u092A \u0915\u0947\u0935\u0932 \u0939\u093F\u0902\u0926\u0940 \u092E\u0947\u0902 \u091C\u0935\u093E\u092C \u0926\u0940\u091C\u093F\u090F\u0964 \u0915\u094B\u0908 \u0905\u0902\u0917\u094D\u0930\u0947\u091C\u0940 \u0936\u092C\u094D\u0926 \u0928\u0939\u0940\u0902\u0964 \u0936\u0941\u0926\u094D\u0927 \u0939\u093F\u0902\u0926\u0940 \u0915\u0947\u0935\u0932\u0964'
+    ? 'The user speaks Hindi/Hinglish. Reply in Hinglish (a natural mix of Hindi and English, using Devanagari script or clean Roman script) so it is easy for them to read. You can keep the program names in English (e.g. "Bachelor of Computer Science") but write the surrounding explanation/sentences in Hindi/Hinglish.'
     : 'Answer ONLY in English. NO Hindi words. Pure English only.';
 
-// ─── Build Gemini API message contents ───────────────────────────────────────
+// ─── Build Ollama-compatible message contents ────────────────────────────────
 const toContents = (
   history: Array<{ role: 'user' | 'assistant'; content: string; image?: string | null }>,
   userMessage: string,
@@ -118,7 +233,21 @@ const toContents = (
   return contents;
 };
 
-// ─── Core Gemini API call ────────────────────────────────────────────────────
+const contentsToOllamaMessages = (contents: ReturnType<typeof toContents>) =>
+  contents.map(item => {
+    const text = item.parts.map(part => part.text || '').join('\n').trim();
+    const images = item.parts
+      .map(part => part.inlineData?.data)
+      .filter((data): data is string => Boolean(data));
+
+    return {
+      role: item.role === 'model' ? 'assistant' : 'user',
+      content: text,
+      ...(images.length > 0 ? {images} : {}),
+    };
+  });
+
+// ─── Core Ollama API call ────────────────────────────────────────────────────
 const callGeminiRaw = async (payload: {
   systemPrompt?: string;
   contents: any[];
@@ -126,33 +255,34 @@ const callGeminiRaw = async (payload: {
   maxOutputTokens?: number;
   jsonMode?: boolean;
 }): Promise<string> => {
-  if (!GEMINI_API_KEY) {
-    throw new Error('GEMINI_API_KEY is not configured.');
+  if (!OLLAMA_BASE_URL) {
+    throw new Error('OLLAMA_BASE_URL is not configured.');
   }
 
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), GEMINI_TIMEOUT_MS);
+  const timeout = setTimeout(() => controller.abort(), OLLAMA_TIMEOUT_MS);
 
   try {
     const body: any = {
-      contents: payload.contents,
-      generationConfig: {
+      model: OLLAMA_MODEL,
+      messages: [
+        ...(payload.systemPrompt ? [{role: 'system', content: payload.systemPrompt}] : []),
+        ...contentsToOllamaMessages(payload.contents),
+      ],
+      stream: false,
+      options: {
         temperature: payload.temperature ?? 0.2,
-        topP: 0.9,
-        maxOutputTokens: payload.maxOutputTokens ?? 512,
+        top_p: 0.9,
+        num_predict: payload.maxOutputTokens ?? 512,
       },
     };
 
-    if (payload.systemPrompt) {
-      body.systemInstruction = { parts: [{ text: payload.systemPrompt }] };
-    }
-
     if (payload.jsonMode) {
-      body.generationConfig.responseMimeType = 'application/json';
+      body.format = 'json';
     }
 
     const response = await fetch(
-      `${GEMINI_BASE_URL.replace(/\/+$/, '')}/models/${encodeURIComponent(GEMINI_MODEL)}:generateContent?key=${encodeURIComponent(GEMINI_API_KEY)}`,
+      `${OLLAMA_BASE_URL.replace(/\/+$/, '')}/api/chat`,
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -165,18 +295,14 @@ const callGeminiRaw = async (payload: {
     const data = rawText ? JSON.parse(rawText) : {};
 
     if (!response.ok) {
-      const errorMessage = data?.error?.message || data?.error || `Gemini error ${response.status}`;
+      const errorMessage = data?.error || `Ollama error ${response.status}`;
       throw new Error(typeof errorMessage === 'string' ? errorMessage : JSON.stringify(errorMessage));
     }
 
-    const reply =
-      data?.candidates?.[0]?.content?.parts
-        ?.map((part: { text?: string }) => part.text || '')
-        .join('')
-        .trim() || '';
+    const reply = data?.message?.content?.trim() || '';
 
     if (!reply) {
-      throw new Error('Gemini returned an empty response.');
+      throw new Error('Ollama returned an empty response.');
     }
 
     return reply;
@@ -186,7 +312,7 @@ const callGeminiRaw = async (payload: {
 };
 
 // ─── Public API ──────────────────────────────────────────────────────────────
-export const isDirectGeminiAvailable = (): boolean => Boolean(GEMINI_API_KEY);
+export const isDirectGeminiAvailable = (): boolean => Boolean(OLLAMA_BASE_URL);
 
 export const directGeminiChat = async (
   userMessage: string,
@@ -199,7 +325,7 @@ export const directGeminiChat = async (
     systemPrompt?: string;
   },
 ): Promise<string> => {
-  const language = options?.language || (containsDevanagari(userMessage) ? 'hi' : 'en');
+  const language = options?.language || detectResponseLanguage(userMessage, history);
   const languageInstruction = buildLanguageInstruction(language);
   const systemPrompt = options?.systemPrompt
     ? `${options.systemPrompt}\n\n${languageInstruction}`
@@ -239,9 +365,15 @@ Hindi: "12\u0935\u0940\u0902", "\u092C\u093E\u0930\u0939\u0935\u0940\u0902", "\u
 RULE: If ANY of these found \u2192 set level. "12th/12\u0935\u0940\u0902/Intermediate/\u0907\u0902\u091F\u0930\u092E\u0940\u0921\u093F\u090F\u091F" = "UG"
 
 FIELD KEYWORDS (if found \u2192 set field):
-English: "computer", "CS", "IT", "technology", "data science", "engineering", "business", "management", "healthcare", "law", "arts"
-Hindi: "\u0915\u0902\u092A\u094D\u092F\u0942\u091F\u0930", "\u0938\u0940\u090F\u0938", "\u0906\u0908\u091F\u0940", "\u091F\u0947\u0915\u094D\u0928\u094B\u0932\u0949\u091C\u0940", "\u0921\u0947\u091F\u093E \u0938\u093E\u0907\u0902\u0938", "\u0907\u0902\u091C\u0940\u0928\u093F\u092F\u0930\u093F\u0902\u0917", "\u092C\u093F\u091C\u0928\u0947\u0938", "\u092E\u0948\u0928\u0947\u091C\u092E\u0947\u0902\u091F"
-RULE: If ANY of these found \u2192 extract exact field name
+English: "data science", "computer science", "cyber security", "computer", "CS", "IT", "technology", "engineering", "business", "management", "healthcare", "law", "arts"
+Hindi: "\u0921\u0947\u091F\u093E \u0938\u093E\u0907\u0902\u0938", "\u0915\u0902\u092A\u094D\u092F\u0942\u091F\u0930 \u0938\u093E\u0907\u0902\u0938", "\u0915\u0902\u092A\u094D\u092F\u0942\u091F\u0930", "\u0938\u0940\u090F\u0938", "\u0906\u0908\u091F\u0940", "\u091F\u0947\u0915\u094D\u0928\u094B\u0932\u0949\u091C\u0940", "\u0907\u0902\u091C\u0940\u0928\u093F\u092F\u0930\u093F\u0902\u0917", "\u092C\u093F\u091C\u0928\u0947\u0938", "\u092E\u0948\u0928\u0947\u091C\u092E\u0947\u0902\u091F"
+RULE: Extract the EXACT field the student mentioned. "data science" is NOT "computer science" \u2014 they are DIFFERENT fields. Always use the student's LATEST/MOST RECENT message to determine field if their interest changed during conversation.
+
+CRITICAL FIELD RULES:
+- "data science" \u2192 field = "data science" (NOT "computer science")
+- "computer science" \u2192 field = "computer science"
+- "cyber security" \u2192 field = "cyber security"
+- If the student said "computer" early but later said "data science" \u2192 field = "data science" (latest intent wins)
 
 SCORE KEYWORDS: "%", "GPA", "percentage", "points"
 
@@ -270,7 +402,7 @@ USER: ${userMessage}`;
       return { topic: 'general', confidence: 0.5, needsMoreInfo: false, summary: 'Parse error fallback' };
     }
   } catch (err: any) {
-    console.warn('[directGemini] analyzeConversation error:', err?.message);
+    console.warn('[directOllama] analyzeConversation error:', err?.message);
     return { topic: 'general', confidence: 0.5, needsMoreInfo: false, summary: 'Fallback: error' };
   }
 };
@@ -279,10 +411,10 @@ export const shouldUseHindiResponse = (message: string) => containsDevanagari(me
 
 export const summarizeDirectGeminiError = (error: unknown): string => {
   const message = error instanceof Error ? error.message : String(error);
-  if (message.includes('GEMINI_API_KEY')) {
-    return 'Set GEMINI_API_KEY to use direct Gemini mode.';
+  if (message.includes('OLLAMA_BASE_URL')) {
+    return 'Set OLLAMA_BASE_URL to use direct Ollama mode.';
   }
-  return 'AI request failed. Please check your network connection.';
+  return 'Ollama request failed. Please check your network connection.';
 };
 
 export const isLikelyNetworkError = (error: unknown): boolean => {

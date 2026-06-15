@@ -1,4 +1,5 @@
 import {PROGRAM_CATALOG, ProgramCatalogItem} from '../data/programCatalog';
+import {resolveLocalServiceUrl} from '../config/serviceUrl';
 
 // ─── Catalog snapshot injected into every prompt ─────────────────────────────
 const CATALOG_SNAPSHOT = PROGRAM_CATALOG.map(
@@ -21,7 +22,11 @@ ${CATALOG_SNAPSHOT}`;
 
 // ─── Ollama config — set OLLAMA_HOST in your .env if not running locally ──────
 const OLLAMA_CONFIG = {
-  baseUrl: process.env.OLLAMA_BASE_URL || 'http://10.132.248.142:11434',
+  baseUrl: resolveLocalServiceUrl({
+    envKeys: ['OLLAMA_BASE_URL', 'OLLAMA_HOST'],
+    port: 11434,
+    path: '',
+  }),
  model: process.env.OLLAMA_MODEL || 'gemma3:4b',   // swap to any pulled model
   timeoutMs: Number(process.env.OLLAMA_TIMEOUT_MS || 30000),
 };

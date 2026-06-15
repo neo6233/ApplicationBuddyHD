@@ -69,7 +69,7 @@ const Strings = {
 
   // Errors
   ERROR_NETWORK:
-    'Cannot reach the backend. On a physical device, point BACKEND_URL to your computer\'s LAN IP.',
+    'Cannot reach the backend. The app auto-detects the host from the bundle URL, so this usually means the backend is not running or unreachable.',
   ERROR_SERVER: 'Server error. Please try again later.',
   ERROR_VALIDATION: 'Please fill all required fields.',
   ERROR_UNKNOWN: 'Something went wrong. Please try again.',
