@@ -96,6 +96,24 @@ const inferLevel = (text: string): 'UG' | 'PG' | 'Diploma' | 'Any' => {
   return 'Any';
 };
 
+const inferEligibilityTargetLevel = (qualification: string): 'UG' | 'PG' | 'Diploma' | 'Any' => {
+  const currentLevel = inferLevel(qualification);
+
+  if (currentLevel === 'UG') {
+    return 'PG';
+  }
+
+  if (currentLevel === 'Diploma') {
+    return 'UG';
+  }
+
+  if (currentLevel === 'PG') {
+    return 'PG';
+  }
+
+  return 'Any';
+};
+
 const extractProfileLocally = (message: string, history: ConversationMessage[]) => {
   const fullText = `${history.filter(h => h.role === 'user').map(h => h.content).join(' ')} ${message}`;
   const normalized = normalize(fullText);
@@ -925,6 +943,77 @@ const parseEligibilityJson = (rawResult: string) => {
   }
 };
 
+const sanitizeEligibilityResult = (
+  result: any,
+  qualification: string,
+  percentage: string,
+  englishScore: string,
+  workExperience: string,
+) => {
+  const targetLevel = inferEligibilityTargetLevel(qualification);
+  const localFallback = buildLocalEligibilityResult(qualification, percentage, englishScore, workExperience);
+
+  const isEligibleStatus = (status: unknown): status is 'eligible' | 'conditional' =>
+    status === 'eligible' || status === 'conditional';
+
+  const mapCatalogCourse = (course: any, fallbackStatus: 'eligible' | 'not_eligible') => {
+    const catalogItem = PROGRAM_CATALOG.find(program => normalize(program.name) === normalize(course?.name));
+    if (!catalogItem) {
+      return null;
+    }
+
+    if (targetLevel !== 'Any' && catalogItem.level !== targetLevel) {
+      return null;
+    }
+
+    return {
+      name: catalogItem.name,
+      university: catalogItem.university,
+      country: catalogItem.country,
+      minimumRequirement: course?.minimumRequirement || catalogItem.eligibility,
+      status: isEligibleStatus(course?.status) ? course.status : fallbackStatus,
+      reason: typeof course?.reason === 'string' && course.reason.trim().length > 0
+        ? course.reason
+        : fallbackStatus === 'eligible'
+          ? 'Your profile matches the catalog entry.'
+          : 'Your profile does not meet this program in the current catalog.',
+    };
+  };
+
+  const eligibleCourses = Array.isArray(result?.eligibleCourses)
+    ? result.eligibleCourses
+        .map((course: any) => mapCatalogCourse(course, 'eligible'))
+        .filter(Boolean)
+        .slice(0, 3)
+    : [];
+
+  const notEligibleCourses = Array.isArray(result?.notEligibleCourses)
+    ? result.notEligibleCourses
+        .map((course: any) => mapCatalogCourse(course, 'not_eligible'))
+        .filter(Boolean)
+        .slice(0, 2)
+    : [];
+
+  if (eligibleCourses.length === 0 && notEligibleCourses.length === 0) {
+    return localFallback;
+  }
+
+  const summary = typeof result?.summary === 'string' && result.summary.trim().length > 0
+    ? result.summary
+    : localFallback.summary;
+
+  const recommendations = Array.isArray(result?.recommendations)
+    ? result.recommendations.filter((item: unknown) => typeof item === 'string' && item.trim().length > 0)
+    : localFallback.recommendations;
+
+  return {
+    eligibleCourses,
+    notEligibleCourses,
+    summary,
+    recommendations,
+  };
+};
+
 const parseScoreValue = (input: string): number | undefined => {
   const normalized = normalize(input);
   const percentMatch = normalized.match(/(\d{1,3}(?:\.\d{1,2})?)\s*%/);
@@ -1000,8 +1089,12 @@ const buildLocalEligibilityResult = (qualification: string, percentage: string, 
   const scoreValue = parseScoreValue(percentage);
   const englishScoreValue = parseScoreValue(englishScore);
   const hasWorkExperience = workExperience.trim().length > 0 && !includesAny(normalize(workExperience), ['none', 'no']);
+  const targetLevel = inferEligibilityTargetLevel(qualification);
+  const candidatePrograms = targetLevel === 'Any'
+    ? PROGRAM_CATALOG
+    : PROGRAM_CATALOG.filter(program => program.level === targetLevel);
 
-  const scoredPrograms = PROGRAM_CATALOG.map(program => {
+  const scoredPrograms = candidatePrograms.map(program => {
     let score = 0;
 
     if (qualificationText.includes('computer') || qualificationText.includes('science') || qualificationText.includes('it')) {
@@ -1022,7 +1115,7 @@ const buildLocalEligibilityResult = (qualification: string, percentage: string, 
       score += 2;
     }
 
-    if (program.level === inferLevel(qualification)) {
+    if (program.level === targetLevel) {
       score += 2;
     }
 
@@ -1050,7 +1143,9 @@ const buildLocalEligibilityResult = (qualification: string, percentage: string, 
       reason:
         scoreValue !== undefined && item.program.minGpa !== undefined && scoreValue >= item.program.minGpa * 10
           ? 'Your score meets the catalog minimum.'
-          : 'Your profile matches the catalog entry.',
+          : targetLevel === 'PG'
+            ? 'Your profile indicates you should look at postgraduate options next.'
+            : 'Your profile matches the catalog entry.',
     }));
 
   const notEligible = scoredPrograms
@@ -1447,9 +1542,16 @@ export const eligibilityController = async (req: Request, res: Response) => {
       percentage,
       englishScore: englishScore || 'Not provided',
       workExperience: workExperience || 'None',
+      targetLevel: inferEligibilityTargetLevel(qualification),
     });
 
-    const result = parseEligibilityJson(rawResult);
+    const result = sanitizeEligibilityResult(
+      parseEligibilityJson(rawResult),
+      qualification,
+      percentage,
+      englishScore || 'Not provided',
+      workExperience || 'None',
+    );
 
     res.json({...result, timestamp: Date.now()});
   } catch (error: any) {

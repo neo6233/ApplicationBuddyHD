@@ -4,6 +4,8 @@ import {
   Text,
   StyleSheet,
   ScrollView,
+  KeyboardAvoidingView,
+  Platform,
 } from 'react-native';
 import {SafeAreaView} from 'react-native-safe-area-context';
 import {NativeStackNavigationProp} from '@react-navigation/native-stack';
@@ -99,132 +101,139 @@ const EligibilityScreen: React.FC<Props> = () => {
   return (
     <GradientBackground>
       <SafeAreaView style={styles.container}>
-      <Header
-        title={Strings.ELIGIBILITY_TITLE}
-        subtitle={Strings.ELIGIBILITY_SUBTITLE}
-        showBack
-        rightAction={
-          results ? {label: 'Reset', onPress: handleClear} : undefined
-        }
-      />
-
-      {loading && <Loader overlay message="Analysing your profile..." />}
-
-      <ScrollView
-        showsVerticalScrollIndicator={false}
-        contentContainerStyle={styles.scrollContent}
-        keyboardShouldPersistTaps="handled">
-
-        <View style={styles.formSection}>
-          <CustomInput
-            label={Strings.ELIGIBILITY_QUALIFICATION_LABEL}
-            placeholder={Strings.ELIGIBILITY_QUALIFICATION_PLACEHOLDER}
-            value={qualification}
-            onChangeText={setQualification}
-            error={formErrors.qualification}
-          />
-          <CustomInput
-            label={Strings.ELIGIBILITY_PERCENTAGE_LABEL}
-            placeholder={Strings.ELIGIBILITY_PERCENTAGE_PLACEHOLDER}
-            value={percentage}
-            onChangeText={setPercentage}
-            error={formErrors.percentage}
-          />
-          <CustomInput
-            label={Strings.ELIGIBILITY_IELTS_LABEL}
-            placeholder={Strings.ELIGIBILITY_IELTS_PLACEHOLDER}
-            value={englishScore}
-            onChangeText={setEnglishScore}
-            error={formErrors.englishScore}
-          />
-          <CustomInput
-            label={Strings.ELIGIBILITY_WORK_LABEL}
-            placeholder={Strings.ELIGIBILITY_WORK_PLACEHOLDER}
-            value={workExperience}
-            onChangeText={setWorkExperience}
+        <KeyboardAvoidingView
+          style={styles.keyboardAvoid}
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          keyboardVerticalOffset={0}>
+          <Header
+            title={Strings.ELIGIBILITY_TITLE}
+            subtitle={Strings.ELIGIBILITY_SUBTITLE}
+            showBack
+            rightAction={
+              results ? {label: 'Reset', onPress: handleClear} : undefined
+            }
           />
 
-          {error && (
-            <View style={styles.errorBanner}>
-              <Text style={styles.errorBannerText}>⚠️ {error}</Text>
+          {loading && <Loader overlay message="Analysing your profile..." />}
+
+          <ScrollView
+            showsVerticalScrollIndicator={false}
+            contentContainerStyle={styles.scrollContent}
+            keyboardShouldPersistTaps="handled"
+            keyboardDismissMode="interactive">
+
+            <View style={styles.formSection}>
+              <CustomInput
+                label={Strings.ELIGIBILITY_QUALIFICATION_LABEL}
+                placeholder={Strings.ELIGIBILITY_QUALIFICATION_PLACEHOLDER}
+                value={qualification}
+                onChangeText={setQualification}
+                error={formErrors.qualification}
+              />
+              <CustomInput
+                label={Strings.ELIGIBILITY_PERCENTAGE_LABEL}
+                placeholder={Strings.ELIGIBILITY_PERCENTAGE_PLACEHOLDER}
+                value={percentage}
+                onChangeText={setPercentage}
+                error={formErrors.percentage}
+              />
+              <CustomInput
+                label={Strings.ELIGIBILITY_IELTS_LABEL}
+                placeholder={Strings.ELIGIBILITY_IELTS_PLACEHOLDER}
+                value={englishScore}
+                onChangeText={setEnglishScore}
+                error={formErrors.englishScore}
+              />
+              <Text style={styles.optionalHint}>Optional. Add it if you already know your IELTS/PTE/TOEFL score.</Text>
+              <CustomInput
+                label={Strings.ELIGIBILITY_WORK_LABEL}
+                placeholder={Strings.ELIGIBILITY_WORK_PLACEHOLDER}
+                value={workExperience}
+                onChangeText={setWorkExperience}
+              />
+
+              {error && (
+                <View style={styles.errorBanner}>
+                  <Text style={styles.errorBannerText}>⚠️ {error}</Text>
+                </View>
+              )}
+
+              <CustomButton
+                title={Strings.ELIGIBILITY_SUBMIT}
+                onPress={handleCheck}
+                loading={loading}
+                style={styles.submitButton}
+              />
             </View>
-          )}
 
-          <CustomButton
-            title={Strings.ELIGIBILITY_SUBMIT}
-            onPress={handleCheck}
-            loading={loading}
-            style={styles.submitButton}
-          />
-        </View>
-
-        {results && (
-          <View style={styles.resultsSection}>
-            {/* Summary */}
-            {results.summary && (
-              <View style={styles.summaryCard}>
-                <Text style={styles.summaryTitle}>📊 Summary</Text>
-                <Text style={styles.summaryText}>{results.summary}</Text>
-              </View>
-            )}
-
-            {/* Recommendations */}
-            {results.recommendations.length > 0 && (
-              <View style={styles.recommendationsCard}>
-                <Text style={styles.recommendationsTitle}>
-                  💡 Recommendations
-                </Text>
-                {results.recommendations.map((rec, i) => (
-                  <View key={i} style={styles.recommendationItem}>
-                    <View style={styles.recDot} />
-                    <Text style={styles.recText}>{rec}</Text>
+            {results && (
+              <View style={styles.resultsSection}>
+                {/* Summary */}
+                {results.summary && (
+                  <View style={styles.summaryCard}>
+                    <Text style={styles.summaryTitle}>📊 Summary</Text>
+                    <Text style={styles.summaryText}>{results.summary}</Text>
                   </View>
-                ))}
-              </View>
-            )}
+                )}
 
-            {/* Eligible Courses */}
-            {results.eligibleCourses.length > 0 && (
-              <View style={styles.courseSection}>
-                <View style={styles.sectionHeader}>
-                  <View
-                    style={[
-                      styles.sectionIndicator,
-                      {backgroundColor: Colors.success},
-                    ]}
-                  />
-                  <Text style={styles.sectionTitle}>
-                    Eligible Programs ({results.eligibleCourses.length})
-                  </Text>
-                </View>
-                {results.eligibleCourses.map((course, i) => (
-                  <CourseItem key={i} course={course} />
-                ))}
-              </View>
-            )}
+                {/* Recommendations */}
+                {results.recommendations.length > 0 && (
+                  <View style={styles.recommendationsCard}>
+                    <Text style={styles.recommendationsTitle}>
+                      💡 Recommendations
+                    </Text>
+                    {results.recommendations.map((rec, i) => (
+                      <View key={i} style={styles.recommendationItem}>
+                        <View style={styles.recDot} />
+                        <Text style={styles.recText}>{rec}</Text>
+                      </View>
+                    ))}
+                  </View>
+                )}
 
-            {/* Not Eligible Courses */}
-            {results.notEligibleCourses.length > 0 && (
-              <View style={styles.courseSection}>
-                <View style={styles.sectionHeader}>
-                  <View
-                    style={[
-                      styles.sectionIndicator,
-                      {backgroundColor: Colors.error},
-                    ]}
-                  />
-                  <Text style={styles.sectionTitle}>
-                    Not Yet Eligible ({results.notEligibleCourses.length})
-                  </Text>
-                </View>
-                {results.notEligibleCourses.map((course, i) => (
-                  <CourseItem key={i} course={course} />
-                ))}
+                {/* Eligible Courses */}
+                {results.eligibleCourses.length > 0 && (
+                  <View style={styles.courseSection}>
+                    <View style={styles.sectionHeader}>
+                      <View
+                        style={[
+                          styles.sectionIndicator,
+                          {backgroundColor: Colors.success},
+                        ]}
+                      />
+                      <Text style={styles.sectionTitle}>
+                        Eligible Programs ({results.eligibleCourses.length})
+                      </Text>
+                    </View>
+                    {results.eligibleCourses.map((course, i) => (
+                      <CourseItem key={i} course={course} />
+                    ))}
+                  </View>
+                )}
+
+                {/* Not Eligible Courses */}
+                {results.notEligibleCourses.length > 0 && (
+                  <View style={styles.courseSection}>
+                    <View style={styles.sectionHeader}>
+                      <View
+                        style={[
+                          styles.sectionIndicator,
+                          {backgroundColor: Colors.error},
+                        ]}
+                      />
+                      <Text style={styles.sectionTitle}>
+                        Not Yet Eligible ({results.notEligibleCourses.length})
+                      </Text>
+                    </View>
+                    {results.notEligibleCourses.map((course, i) => (
+                      <CourseItem key={i} course={course} />
+                    ))}
+                  </View>
+                )}
               </View>
             )}
-          </View>
-        )}
-      </ScrollView>
+          </ScrollView>
+        </KeyboardAvoidingView>
       </SafeAreaView>
     </GradientBackground>
   );
@@ -234,7 +243,11 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
   },
+  keyboardAvoid: {
+    flex: 1,
+  },
   scrollContent: {
+    flexGrow: 1,
     paddingBottom: 40,
   },
   formSection: {
@@ -242,6 +255,13 @@ const styles = StyleSheet.create({
   },
   submitButton: {
     marginTop: 8,
+  },
+  optionalHint: {
+    color: Colors.textSecondary,
+    fontSize: 12,
+    marginTop: -8,
+    marginBottom: 10,
+    paddingHorizontal: 4,
   },
   errorBanner: {
     backgroundColor: 'rgba(251, 113, 133, 0.1)',

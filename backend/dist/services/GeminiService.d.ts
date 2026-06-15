@@ -61,6 +61,7 @@ declare class GeminiService {
         percentage: string;
         englishScore: string;
         workExperience: string;
+        targetLevel?: 'UG' | 'PG' | 'Diploma' | 'Any';
     }): Promise<string>;
 }
 declare const _default: GeminiService;

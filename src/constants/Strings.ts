@@ -53,7 +53,7 @@ const Strings = {
   ELIGIBILITY_QUALIFICATION_PLACEHOLDER: 'e.g. Bachelor of Engineering',
   ELIGIBILITY_PERCENTAGE_LABEL: 'Overall Percentage / GPA',
   ELIGIBILITY_PERCENTAGE_PLACEHOLDER: 'e.g. 72% or 3.2 GPA',
-  ELIGIBILITY_IELTS_LABEL: 'English Test Score',
+  ELIGIBILITY_IELTS_LABEL: 'English Proficiency Score (optional)',
   ELIGIBILITY_IELTS_PLACEHOLDER: 'e.g. IELTS 6.5 / PTE 58 / TOEFL 90',
   ELIGIBILITY_WORK_LABEL: 'Work Experience',
   ELIGIBILITY_WORK_PLACEHOLDER: 'e.g. 2 years in Software Development',

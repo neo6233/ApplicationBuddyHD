@@ -69,8 +69,8 @@ const Validators = {
     if (!Validators.isNotEmpty(percentage)) {
       errors.percentage = 'Percentage or GPA is required';
     }
-    if (!Validators.isNotEmpty(englishScore)) {
-      errors.englishScore = 'English test score is required';
+    if (englishScore.trim().length > 0 && !/^[\d.\s/a-zA-Z-]+$/.test(englishScore.trim())) {
+      errors.englishScore = 'Please enter a valid English score format';
     }
 
     return {valid: Object.keys(errors).length === 0, errors};

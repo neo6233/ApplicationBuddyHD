@@ -7,6 +7,31 @@ const normalizeText = (value: string) => value.toLowerCase().replace(/\s+/g, ' '
 
 const containsDevanagari = (text: string) => /[\u0900-\u097F]/.test(text);
 
+const cleanTextForSpeech = (text: string): string => {
+  if (!text) return '';
+
+  let cleaned = text;
+
+  // Replace middle dots (·) and bullet characters with a comma or space for a natural pause
+  cleaned = cleaned.replace(/·/g, ', ');
+  cleaned = cleaned.replace(/[•●▪◦■◆]/g, ' ');
+
+  // Replace space-isolated dots (e.g., "University . USA") with a comma and space
+  cleaned = cleaned.replace(/\s+\.\s+/g, ', ');
+
+  // Remove markdown bold/italic asterisks completely
+  cleaned = cleaned.replace(/\*\*/g, '');
+  cleaned = cleaned.replace(/\*/g, '');
+
+  // Remove hyphens used as list items
+  cleaned = cleaned.replace(/(?:^|\n)\s*-\s+/g, '\n');
+
+  // Collapse multiple spaces/newlines
+  cleaned = cleaned.replace(/\s+/g, ' ').trim();
+
+  return cleaned;
+};
+
 const detectPreferredLanguage = (text: string, override?: 'hi' | 'en'): 'hi' | 'en' => {
   if (override) return override;
   
@@ -85,7 +110,11 @@ export async function speak(text: string, language?: 'hi' | 'en'): Promise<void>
     await selectIndianAccentVoice(preferredLanguage);
     await Tts.stop();
     await new Promise(resolve => setTimeout(resolve, 120));
-    await Tts.speak(text);
+    
+    const cleanedText = cleanTextForSpeech(text);
+    if (!cleanedText) return;
+    
+    await Tts.speak(cleanedText);
   } catch (error) {
     console.warn('[TTS] Failed to speak:', error);
   }
