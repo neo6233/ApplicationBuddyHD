@@ -6,7 +6,7 @@ export interface KnowledgeHit {
 }
 declare class VectorKnowledgeService {
     private documents;
-    search(query: string, limit?: number): KnowledgeHit[];
+    search(query: unknown, limit?: number): KnowledgeHit[];
 }
 declare const _default: VectorKnowledgeService;
 export default _default;

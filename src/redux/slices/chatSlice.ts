@@ -74,6 +74,7 @@ export const sendMessage = createAsyncThunk(
           intake: p.intake,
           eligibility: p.eligibility,
           careerOpportunities: p.careerOpportunities,
+          level: (p as any).level,
           matchScore: (p as any).matchScore ?? 0,
         })),
         timestamp: result.timestamp ?? Date.now(),

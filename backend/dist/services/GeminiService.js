@@ -62,9 +62,22 @@ const getOllamaConfig = () => {
     };
 };
 // ─── Helpers ──────────────────────────────────────────────────────────────────
-const normalize = (text) => text.toLowerCase().replace(/[\u2018\u2019]/g, "'").replace(/\s+/g, ' ').trim();
+const toSafeText = (value) => {
+    if (typeof value === 'string')
+        return value;
+    if (value === null || value === undefined)
+        return '';
+    if (typeof value === 'object') {
+        const candidate = value;
+        const nested = candidate.content ?? candidate.text ?? candidate.message;
+        if (typeof nested === 'string')
+            return nested;
+    }
+    return String(value);
+};
+const normalize = (text) => toSafeText(text).toLowerCase().replace(/[\u2018\u2019]/g, "'").replace(/\s+/g, ' ').trim();
 const includesAny = (text, keywords) => keywords.some(kw => text.includes(kw));
-const containsDevanagari = (text) => /[\u0900-\u097F]/.test(text);
+const containsDevanagari = (text) => /[\u0900-\u097F]/.test(toSafeText(text));
 // ─── Comprehensive Hinglish (Romanized Hindi) Detection ──────────────────────
 const HINDI_WORDS = new Set([
     // Pronouns & common subjects
@@ -455,7 +468,7 @@ USER: ${userMessage}`;
         const messages = [
             ...history.map(msg => ({
                 role: (msg.role === 'assistant' ? 'assistant' : 'user'),
-                content: msg.content,
+                content: toSafeText(msg.content),
                 ...(normalizeImageData(msg.image) ? { images: [normalizeImageData(msg.image)] } : {}),
             })),
             {

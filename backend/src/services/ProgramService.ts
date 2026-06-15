@@ -10,8 +10,19 @@ interface ProgramSearchFilters {
   targetLevel?: ProgramLevel | 'Any';
 }
 
-const normalize = (text: string) =>
-  text
+const toSafeText = (value: unknown): string => {
+  if (typeof value === 'string') return value;
+  if (value === null || value === undefined) return '';
+  if (typeof value === 'object') {
+    const candidate = value as {content?: unknown; text?: unknown; message?: unknown};
+    const nested = candidate.content ?? candidate.text ?? candidate.message;
+    if (typeof nested === 'string') return nested;
+  }
+  return String(value);
+};
+
+const normalize = (text: unknown) =>
+  toSafeText(text)
     .toLowerCase()
     .replace(/[\u2018\u2019]/g, "'")
     .replace(/\s+/g, ' ')
@@ -56,7 +67,7 @@ const inferQualificationLevel = (qualification: string): ProgramLevel | 'Any' =>
 const inferTargetLevel = (text: string): ProgramLevel | 'Any' => {
   const normalized = normalize(text);
   if (includesAny(normalized, ['master', 'masters', 'msc', 'mtech', 'mba', 'postgraduate', 'pg course'])) return 'PG';
-  if (includesAny(normalized, ['bachelor', 'bachelors', 'graduation', 'graduate', 'degree', 'undergraduate'])) return 'PG';
+  if (includesAny(normalized, ['bachelor', 'bachelors', 'degree after 12th', 'undergraduate', 'ug course'])) return 'UG';
   if (includesAny(normalized, ['diploma', 'certificate'])) return 'Diploma';
   if (includesAny(normalized, ['12th', '12 pass', 'class 12', 'high school', 'secondary', 'degree after 12th', 'ug course'])) return 'UG';
   return 'Any';
@@ -110,7 +121,7 @@ class ProgramService {
     return programs;
   }
 
-  searchByKeyword(keyword: string): Program[] {
+  searchByKeyword(keyword: unknown): Program[] {
     const normalizedKeyword = normalize(keyword);
     const programs = PROGRAM_CATALOG.filter(program =>
       normalize(program.name).includes(normalizedKeyword) ||

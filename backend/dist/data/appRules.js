@@ -75,7 +75,20 @@ exports.APP_RULES = [
         text: 'When the user mentions one specific program name (e.g. "Bachelor of Computer Science" or "बैचलर ऑफ़ कंप्यूटर साइंस"), provide information or details about that specific program instead of listing other different courses.',
     },
 ];
-const normalize = (text) => text.toLowerCase().replace(/[\u2018\u2019]/g, "'").replace(/\s+/g, ' ').trim();
+const toSafeText = (value) => {
+    if (typeof value === 'string')
+        return value;
+    if (value === null || value === undefined)
+        return '';
+    if (typeof value === 'object') {
+        const candidate = value;
+        const nested = candidate.content ?? candidate.text ?? candidate.message;
+        if (typeof nested === 'string')
+            return nested;
+    }
+    return String(value);
+};
+const normalize = (text) => toSafeText(text).toLowerCase().replace(/[\u2018\u2019]/g, "'").replace(/\s+/g, ' ').trim();
 const findRelevantAppRules = (text, limit = 3) => {
     const normalized = normalize(text);
     return exports.APP_RULES.map(rule => ({

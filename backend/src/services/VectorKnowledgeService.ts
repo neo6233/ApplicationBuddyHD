@@ -73,20 +73,31 @@ const STOP_WORDS = new Set([
   'please'
 ]);
 
-const normalize = (text: string) =>
-  text
+const toSafeText = (value: unknown): string => {
+  if (typeof value === 'string') return value;
+  if (value === null || value === undefined) return '';
+  if (typeof value === 'object') {
+    const candidate = value as {content?: unknown; text?: unknown; message?: unknown};
+    const nested = candidate.content ?? candidate.text ?? candidate.message;
+    if (typeof nested === 'string') return nested;
+  }
+  return String(value);
+};
+
+const normalize = (text: unknown) =>
+  toSafeText(text)
     .toLowerCase()
     .replace(/[\u2018\u2019]/g, "'")
     .replace(/[^a-z0-9%+.\s\u0900-\u097F]/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
 
-const tokenize = (text: string) =>
+const tokenize = (text: unknown) =>
   normalize(text)
     .split(' ')
     .filter(token => token.length > 1 && !STOP_WORDS.has(token));
 
-const toVector = (text: string) => {
+const toVector = (text: unknown) => {
   const tokens = tokenize(text);
   const vector = new Map<string, number>();
 
@@ -222,7 +233,7 @@ const buildDocuments = (): KnowledgeDocument[] => {
 class VectorKnowledgeService {
   private documents = buildDocuments();
 
-  search(query: string, limit = 5): KnowledgeHit[] {
+  search(query: unknown, limit = 5): KnowledgeHit[] {
     const queryVector = toVector(query);
 
     return this.documents

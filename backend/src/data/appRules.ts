@@ -80,10 +80,21 @@ export const APP_RULES: AppRule[] = [
   },
 ];
 
-const normalize = (text: string) =>
-  text.toLowerCase().replace(/[\u2018\u2019]/g, "'").replace(/\s+/g, ' ').trim();
+const toSafeText = (value: unknown): string => {
+  if (typeof value === 'string') return value;
+  if (value === null || value === undefined) return '';
+  if (typeof value === 'object') {
+    const candidate = value as {content?: unknown; text?: unknown; message?: unknown};
+    const nested = candidate.content ?? candidate.text ?? candidate.message;
+    if (typeof nested === 'string') return nested;
+  }
+  return String(value);
+};
 
-export const findRelevantAppRules = (text: string, limit = 3): AppRule[] => {
+const normalize = (text: unknown) =>
+  toSafeText(text).toLowerCase().replace(/[\u2018\u2019]/g, "'").replace(/\s+/g, ' ').trim();
+
+export const findRelevantAppRules = (text: unknown, limit = 3): AppRule[] => {
   const normalized = normalize(text);
 
   return APP_RULES.map(rule => ({

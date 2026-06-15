@@ -9,7 +9,7 @@ interface ProgramSearchFilters {
 }
 declare class ProgramService {
     search(filters: ProgramSearchFilters): Program[];
-    searchByKeyword(keyword: string): Program[];
+    searchByKeyword(keyword: unknown): Program[];
     getAllPrograms(): Program[];
     private scoreCatalogItem;
 }

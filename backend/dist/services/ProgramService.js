@@ -1,7 +1,20 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 const programCatalog_1 = require("../data/programCatalog");
-const normalize = (text) => text
+const toSafeText = (value) => {
+    if (typeof value === 'string')
+        return value;
+    if (value === null || value === undefined)
+        return '';
+    if (typeof value === 'object') {
+        const candidate = value;
+        const nested = candidate.content ?? candidate.text ?? candidate.message;
+        if (typeof nested === 'string')
+            return nested;
+    }
+    return String(value);
+};
+const normalize = (text) => toSafeText(text)
     .toLowerCase()
     .replace(/[\u2018\u2019]/g, "'")
     .replace(/\s+/g, ' ')
@@ -44,8 +57,8 @@ const inferTargetLevel = (text) => {
     const normalized = normalize(text);
     if (includesAny(normalized, ['master', 'masters', 'msc', 'mtech', 'mba', 'postgraduate', 'pg course']))
         return 'PG';
-    if (includesAny(normalized, ['bachelor', 'bachelors', 'graduation', 'graduate', 'degree', 'undergraduate']))
-        return 'PG';
+    if (includesAny(normalized, ['bachelor', 'bachelors', 'degree after 12th', 'undergraduate', 'ug course']))
+        return 'UG';
     if (includesAny(normalized, ['diploma', 'certificate']))
         return 'Diploma';
     if (includesAny(normalized, ['12th', '12 pass', 'class 12', 'high school', 'secondary', 'degree after 12th', 'ug course']))

@@ -41,6 +41,31 @@ const normalize = (text: unknown) =>
 const includesAny = (text: string, keywords: string[]) =>
   keywords.some(keyword => text.includes(keyword));
 
+const sanitizeConversationHistory = (history: unknown): ConversationMessage[] => {
+  if (!Array.isArray(history)) {
+    return [];
+  }
+
+  return history
+    .map(item => {
+      const message = item as Partial<ConversationMessage> & {role?: unknown; content?: unknown; image?: unknown; programs?: unknown};
+      const role: ConversationMessage['role'] = message.role === 'assistant' ? 'assistant' : 'user';
+      const content = toSafeText(message.content);
+      const image = typeof message.image === 'string' ? message.image : null;
+      const programs = Array.isArray(message.programs)
+        ? message.programs.filter(program => program && typeof program === 'object') as ProgramCatalogItem[]
+        : undefined;
+
+      return {
+        role,
+        content,
+        image,
+        ...(programs?.length ? {programs} : {}),
+      };
+    })
+    .filter(message => message.content.trim().length > 0 || message.programs?.length);
+};
+
 const inferQuestionIntent = (text: string): QuestionIntent => {
   const normalized = normalize(text);
   if (includesAny(normalized, ['career', 'job', 'scope', 'opportunit', 'future', 'salary'])) {
@@ -61,6 +86,48 @@ const inferQuestionIntent = (text: string): QuestionIntent => {
   return 'detail';
 };
 
+const isAlternativeReasonQuestion = (text: unknown) => {
+  const normalized = normalize(text);
+  return includesAny(normalized, [
+    'why another course',
+    'why other course',
+    'why this course',
+    'why this program',
+    'why data science',
+    'means why',
+    'reason',
+  ]);
+};
+
+const isCivilServiceQuestion = (text: unknown) => {
+  const normalized = normalize(text);
+  return includesAny(normalized, [
+    'ias',
+    'pcs',
+    'upsc',
+    'civil service',
+    'civil services',
+    'public service commission',
+    'state pcs',
+  ]);
+};
+
+const buildCivilServiceReply = (language: 'en' | 'hi') => {
+  if (language === 'hi') {
+    return [
+      'IAS/PCS ke liye aap kisi bhi recognized bachelor degree ke baad eligible hote hain. 12th ke baad pehle graduation complete karein.',
+      'Best path: 1. 12th ke baad BA/BSc/BCom/BBA ya koi bhi degree choose karein. 2. Graduation ke saath NCERT, current affairs, polity, history, geography, economy aur aptitude prepare karein. 3. UPSC/State PCS syllabus aur previous year papers follow karein.',
+      'Agar aap abhi 12th ke baad course choose kar rahe hain, BA Political Science, History, Public Administration, Economics, Sociology, ya BSc/BCom bhi useful ho sakte hain. Mere app catalog mein direct IAS/PCS course nahi hai, but bachelor degree planning mein main help kar sakta hoon.',
+    ].join('\n\n');
+  }
+
+  return [
+    'For IAS/PCS, you first need to complete a recognized bachelor degree. You cannot apply directly after 12th.',
+    'Best path: 1. Choose any bachelor degree after 12th. 2. Alongside graduation, prepare NCERTs, current affairs, polity, history, geography, economy, and aptitude. 3. Follow the UPSC or State PCS syllabus and previous year papers.',
+    'Helpful bachelor subjects include Political Science, History, Public Administration, Economics, Sociology, BA, BSc, BCom, or BBA. My app catalog does not have a direct IAS/PCS program, but I can help you choose a suitable bachelor path.',
+  ].join('\n\n');
+};
+
 const inferRequestedProgramLevel = (text: string): ProgramLevel | undefined => {
   const normalized = normalize(text);
   if (includesAny(normalized, ['master', 'masters', 'msc', 'mtech', 'mba', 'postgraduate', 'pg course'])) {
@@ -76,7 +143,36 @@ const inferRequestedProgramLevel = (text: string): ProgramLevel | undefined => {
 };
 
 const hasSchoolQualification = (text: string) =>
+  /\b(?:after\s+(?:my\s+)?|class\s*)12\b|\b12\s*(?:pass|standard|std|grade)\b/i.test(normalize(text)) ||
   includesAny(normalize(text), ['12th', '12 pass', 'class 12', 'high school', 'secondary', 'intermediate', '10th']);
+
+const isAfter12CatalogFilterRequest = (text: unknown) => {
+  const normalized = normalize(text);
+  return hasSchoolQualification(normalized) && includesAny(normalized, [
+    'only',
+    'can do',
+    'directly',
+    'eligible',
+    'pursue',
+    'available',
+    'possible',
+    'which i can',
+    'after completing',
+    'after my',
+  ]);
+};
+
+const getProgramsForRequestedLevel = (level: 'UG' | 'PG' | 'Diploma' | 'Any') => {
+  if (level === 'UG') {
+    return ProgramService.getAllPrograms().filter(program => program.level === 'UG' || program.level === 'Diploma');
+  }
+
+  if (level === 'Any') {
+    return ProgramService.getAllPrograms();
+  }
+
+  return ProgramService.getAllPrograms().filter(program => program.level === level);
+};
 
 const hasBachelorQualification = (text: string) =>
   /\b(passed|completed|done|finished|have|holding)\s+(a\s+)?(bachelor|bachelor's|btech|b\.tech|b\.sc|bsc|b\.e|be|graduation|graduate)\b/i.test(text) ||
@@ -89,6 +185,7 @@ const inferLevel = (text: string): 'UG' | 'PG' | 'Diploma' | 'Any' => {
   if (includesAny(t, ['diploma', 'certificate', 'polytechnic'])) return 'Diploma';
   if (includesAny(t, ['bachelor', 'be', 'btech', 'b.sc', 'bba', 'undergraduate', 'ug', 'b.a', 'b.com'])) return 'UG';
   if (includesAny(t, ['12th', '12 pass', 'class 12', 'high school', 'secondary', '10th', '10 pass'])) return 'UG';
+  if (/\b(?:after\s+(?:my\s+)?|class\s*)12\b|\b12\s*(?:pass|standard|std|grade)\b/i.test(t)) return 'UG';
   // Hindi education levels
   if (includesAny(t, ['12वीं', '12वीं पास', 'बारहवीं', 'दसवीं', '10वीं'])) return 'UG';
   if (includesAny(t, ['स्नातक', 'स्नातकोत्तर', 'मास्टर्स', 'पीजी'])) return 'PG';
@@ -466,7 +563,7 @@ const getCatalogProgramByName = (programName?: unknown) => {
 
 const isFollowUpProgramQuestion = (text: unknown) => {
   const normalized = normalize(text);
-  return /it/i.test(normalized) || includesAny(normalized, [
+  return /\bit\b/i.test(normalized) || includesAny(normalized, [
     'this course',
     'that course',
     'this program',
@@ -486,6 +583,12 @@ const isFollowUpProgramQuestion = (text: unknown) => {
     'what is this course',
     'what is this program',
     'what about this',
+    'why this',
+    'why this course',
+    'why this program',
+    'why another course',
+    'why other course',
+    'means why',
   ]);
 };
 
@@ -648,15 +751,14 @@ const resolveProgramFromConversation = (
 };
 
 const buildProgramRecommendationReply = (programs: ProgramCatalogItem[], language: 'en' | 'hi') => {
-  const topPrograms = programs.slice(0, 3);
   const heading =
     language === 'hi'
       ? 'मैंने आपके लिए ये सबसे अच्छे मिलते-जुलते कोर्स पाए हैं:'
       : 'I found these matching courses for you:';
 
   return {
-    reply: `${heading}\n${topPrograms.map(program => `• ${program.name}`).join('\n')}`,
-    programs: topPrograms,
+    reply: `${heading}\n${programs.map(program => `• ${program.name}`).join('\n')}`,
+    programs,
   };
 };
 
@@ -665,14 +767,51 @@ const buildProgramRecommendationText = (
   language: 'en' | 'hi',
   intro?: string,
 ) => {
-  const visiblePrograms = programs.slice(0, 3);
   const heading = intro || (
     language === 'hi'
       ? 'आपके लिए ये कोर्स सही रहेंगे:'
       : 'These are the best matching courses from my catalog:'
   );
 
-  return `${heading}\n${visiblePrograms.map(program => `• ${program.name} - ${program.eligibility}`).join('\n')}`;
+  return `${heading}\n${programs.map(program => `• ${program.name} - ${program.eligibility}`).join('\n')}`;
+};
+
+const formatProgramLine = (program: ProgramCatalogItem) =>
+  `• ${program.name} at ${program.university}, ${program.country}. Duration: ${program.duration}. Intake: ${program.intake}. Eligibility: ${program.eligibility}.`;
+
+const buildCatalogListReply = (programs: ProgramCatalogItem[], language: 'en' | 'hi') => {
+  const heading =
+    language === 'hi'
+      ? 'मेरे catalog में ये courses available हैं:'
+      : 'Here are all the courses I have in my catalog:';
+
+  return `${heading}\n${programs.map(formatProgramLine).join('\n')}`;
+};
+
+const buildAfter12CatalogListReply = (programs: ProgramCatalogItem[], language: 'en' | 'hi') => {
+  const heading =
+    language === 'hi'
+      ? '12th ke baad mere catalog mein ye UG/Diploma courses available hain:'
+      : 'After 12th, these UG/Diploma courses are available in my catalog:';
+
+  return `${heading}\n${programs.map(formatProgramLine).join('\n')}`;
+};
+
+const buildAlternativeReasonReply = (
+  currentProgram: ProgramCatalogItem,
+  history: ConversationMessage[],
+  language: 'en' | 'hi',
+) => {
+  const previousProgram = getLastRecommendedProgram(history);
+  const previousText = previousProgram && previousProgram.name !== currentProgram.name
+    ? ` I suggested it as another option because your profile can match more than one catalog path; ${previousProgram.name} is one option, while ${currentProgram.name} is another.`
+    : '';
+
+  if (language === 'hi') {
+    return `${currentProgram.name} suggest karne ka reason ye hai ki iski eligibility "${currentProgram.eligibility}" hai aur ye ${currentProgram.fields.slice(0, 2).join(' / ')} interest se match karta hai. Agar aap 12th ke baad options dekh rahe ho, to main catalog ke UG/Diploma options compare karke best fit batata hoon.`;
+  }
+
+  return `${currentProgram.name} is suggested because its eligibility is "${currentProgram.eligibility}" and it matches ${currentProgram.fields.slice(0, 2).join(' / ')} interests.${previousText} If you want courses after 12th, I compare only UG and Diploma catalog options and explain why one fits better than another.`;
 };
 
 const hasExplicitlyNoMathBackground = (text: unknown) => {
@@ -1185,10 +1324,11 @@ export const chatController = async (req: Request, res: Response) => {
       return;
     }
 
-    const safeHistory = Array.isArray(history) ? history : [];
+    const safeHistory = sanitizeConversationHistory(history);
     const cleanMessage = message.trim();
     const responseLanguage = detectResponseLanguage(cleanMessage, safeHistory);
-    const knowledgeHits = VectorKnowledgeService.search(cleanMessage);
+    const retrievalContext = `${safeHistory.slice(-6).map(item => item.content).join(' ')} ${cleanMessage}`;
+    const knowledgeHits = VectorKnowledgeService.search(retrievalContext);
 
     // ── Save program intent check ──────────────────────────────────────────
     if (isSaveIntent(cleanMessage)) {
@@ -1212,14 +1352,28 @@ export const chatController = async (req: Request, res: Response) => {
     const isListRequest = listAllRegex.test(cleanMessage) ||
                           includesAny(normalize(cleanMessage), ['course list', 'courses list', 'program list', 'list of programs', 'list of courses', 'all programs', 'all courses', 'सभी कोर्स', 'सभी प्रोग्राम']);
     if (isListRequest) {
-      const programs = ProgramService.getAllPrograms();
+      const listLevel = inferLevel(cleanMessage);
+      const programs = getProgramsForRequestedLevel(listLevel);
       res.json({
-        reply:
-          responseLanguage === 'hi'
-            ? 'मेरे कैटलॉग में उपलब्ध सभी कोर्स यहाँ हैं:'
-            : 'Here are all the courses I have in my catalog:',
+        reply: listLevel === 'UG'
+          ? buildAfter12CatalogListReply(programs, responseLanguage)
+          : buildCatalogListReply(programs, responseLanguage),
         programs,
         responseLanguage,
+        responseType: 'recommendation',
+        timestamp: Date.now(),
+      });
+      return;
+    }
+
+    // ── Follow-up filter: "only courses I can do after 12th" ───────────────
+    if (isAfter12CatalogFilterRequest(cleanMessage)) {
+      const programs = getProgramsForRequestedLevel('UG');
+      res.json({
+        reply: buildAfter12CatalogListReply(programs, responseLanguage),
+        programs,
+        responseLanguage,
+        responseType: 'recommendation',
         timestamp: Date.now(),
       });
       return;
@@ -1239,13 +1393,15 @@ export const chatController = async (req: Request, res: Response) => {
       ? {program: finalizedProgram, ambiguous: false}
       : resolveProgramFromConversation(cleanMessage, safeHistory);
     if (programContext.program) {
-      const reply = buildThoughtfulProgramReply(
-        programContext.program,
-        cleanMessage,
-        safeHistory,
-        responseLanguage,
-        knowledgeHits,
-      );
+      const reply = isAlternativeReasonQuestion(cleanMessage)
+        ? buildAlternativeReasonReply(programContext.program, safeHistory, responseLanguage)
+        : buildThoughtfulProgramReply(
+            programContext.program,
+            cleanMessage,
+            safeHistory,
+            responseLanguage,
+            knowledgeHits,
+          );
       await sendResponse(res, cleanMessage, safeHistory, responseLanguage, {
         reply,
         responseLanguage,
@@ -1257,6 +1413,20 @@ export const chatController = async (req: Request, res: Response) => {
         knowledge: knowledgeHits.map(hit => hit.id),
       });
       return;
+    }
+
+    if (isAlternativeReasonQuestion(cleanMessage)) {
+      const recentProgram = getBestRecommendedProgram(safeHistory) || getLastRecommendedProgram(safeHistory);
+      if (recentProgram) {
+        await sendResponse(res, cleanMessage, safeHistory, responseLanguage, {
+          reply: buildAlternativeReasonReply(recentProgram, safeHistory, responseLanguage),
+          responseLanguage,
+          responseType: 'detail',
+          programs: [recentProgram],
+          knowledge: knowledgeHits.map(hit => hit.id),
+        });
+        return;
+      }
     }
 
     if (programContext.ambiguous) {
@@ -1478,9 +1648,10 @@ export const chatController = async (req: Request, res: Response) => {
     await sendResponse(res, cleanMessage, safeHistory, responseLanguage, {reply, responseLanguage});
   } catch (error: any) {
     console.error('[ChatController] Error:', error?.message || error);
-    // Ollama is offline or unreachable
-    res.status(500).json({
-      reply: "I'm having trouble connecting to Ollama. Please check that the Ollama service is running and reachable.",
+    res.json({
+      reply: "I had trouble reading the previous chat context, but I can still help. Please ask that question again in one line.",
+      responseLanguage: 'en',
+      responseType: 'general',
       timestamp: Date.now(),
     });
   }

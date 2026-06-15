@@ -59,7 +59,20 @@ const STOP_WORDS = new Set([
     'plez',
     'please'
 ]);
-const normalize = (text) => text
+const toSafeText = (value) => {
+    if (typeof value === 'string')
+        return value;
+    if (value === null || value === undefined)
+        return '';
+    if (typeof value === 'object') {
+        const candidate = value;
+        const nested = candidate.content ?? candidate.text ?? candidate.message;
+        if (typeof nested === 'string')
+            return nested;
+    }
+    return String(value);
+};
+const normalize = (text) => toSafeText(text)
     .toLowerCase()
     .replace(/[\u2018\u2019]/g, "'")
     .replace(/[^a-z0-9%+.\s\u0900-\u097F]/g, ' ')

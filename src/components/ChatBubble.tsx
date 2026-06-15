@@ -13,6 +13,7 @@ interface ChatBubbleProps {
 const ChatBubble: React.FC<ChatBubbleProps> = ({message, onSaveProgram, isProgramSaved}) => {
   const isUser = message.role === 'user';
   const primaryProgram = message.programs?.[0];
+  const showProgramList = Boolean(!isUser && message.programs?.length);
   const showSaveAction = Boolean(
     !isUser &&
       message.responseType === 'final_recommendation' &&
@@ -20,6 +21,21 @@ const ChatBubble: React.FC<ChatBubbleProps> = ({message, onSaveProgram, isProgra
       primaryProgram &&
       onSaveProgram,
   );
+
+  const getVisibleTextContent = (content: string) => {
+    if (!showProgramList) {
+      return content;
+    }
+
+    const lines = content.split('\n');
+    const firstProgramLine = lines.findIndex(line => {
+      const trimmed = line.trim();
+      return trimmed.startsWith('•') || trimmed.startsWith('*');
+    });
+
+    const introLines = firstProgramLine >= 0 ? lines.slice(0, firstProgramLine) : lines;
+    return introLines.join('\n').trim();
+  };
 
   const renderContent = (content: string) => {
     const lines = content.split('\n');
@@ -65,6 +81,41 @@ const ChatBubble: React.FC<ChatBubbleProps> = ({message, onSaveProgram, isProgra
     });
   };
 
+  const renderProgramList = () => {
+    if (!message.programs?.length) {
+      return null;
+    }
+
+    return (
+      <View style={styles.programList}>
+        {message.programs.map((program, index) => (
+          <View key={`${program.name}-${index}`} style={styles.programItem}>
+            <View style={styles.programHeader}>
+              <Text style={styles.programName}>{program.name}</Text>
+              {program.level ? (
+                <View style={styles.programLevelBadge}>
+                  <Text style={styles.programLevelText}>{program.level}</Text>
+                </View>
+              ) : null}
+            </View>
+            <Text style={styles.programUniversity}>
+              {program.university} · {program.country}
+            </Text>
+            <View style={styles.programMetaRow}>
+              <Text style={styles.programMeta}>Duration: {program.duration}</Text>
+              <Text style={styles.programMeta}>Intake: {program.intake}</Text>
+            </View>
+            <Text style={styles.programEligibility}>
+              Eligibility: {program.eligibility}
+            </Text>
+          </View>
+        ))}
+      </View>
+    );
+  };
+
+  const visibleContent = getVisibleTextContent(message.content);
+
   return (
     <View
       style={[
@@ -97,9 +148,10 @@ const ChatBubble: React.FC<ChatBubbleProps> = ({message, onSaveProgram, isProgra
               resizeMode="cover"
             />
           ) : null}
-          {message.content ? (
-            <View>{renderContent(message.content)}</View>
+          {visibleContent ? (
+            <View>{renderContent(visibleContent)}</View>
           ) : null}
+          {showProgramList ? renderProgramList() : null}
           {showSaveAction ? (
             <TouchableOpacity
               style={[
@@ -273,6 +325,65 @@ const styles = StyleSheet.create({
   },
   aiBulletText: {
     color: '#CBD5E1',
+  },
+  programList: {
+    marginTop: 10,
+    gap: 10,
+  },
+  programItem: {
+    paddingTop: 10,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(148, 163, 184, 0.18)',
+  },
+  programHeader: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 8,
+  },
+  programName: {
+    flex: 1,
+    fontSize: 15,
+    lineHeight: 20,
+    fontWeight: '800',
+    color: Colors.textPrimary,
+  },
+  programLevelBadge: {
+    minWidth: 34,
+    alignItems: 'center',
+    paddingHorizontal: 7,
+    paddingVertical: 3,
+    borderRadius: 8,
+    backgroundColor: 'rgba(139, 92, 246, 0.18)',
+    borderWidth: 1,
+    borderColor: 'rgba(167, 139, 250, 0.25)',
+  },
+  programLevelText: {
+    fontSize: 10,
+    lineHeight: 12,
+    fontWeight: '800',
+    color: Colors.accentLight,
+  },
+  programUniversity: {
+    marginTop: 4,
+    fontSize: 13,
+    lineHeight: 18,
+    fontWeight: '600',
+    color: Colors.textSecondary,
+  },
+  programMetaRow: {
+    marginTop: 7,
+    gap: 4,
+  },
+  programMeta: {
+    fontSize: 12,
+    lineHeight: 17,
+    color: '#CBD5E1',
+  },
+  programEligibility: {
+    marginTop: 7,
+    fontSize: 12,
+    lineHeight: 17,
+    color: '#E2E8F0',
   },
   timestamp: {
     fontSize: 11,

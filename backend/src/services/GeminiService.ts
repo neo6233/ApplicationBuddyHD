@@ -118,13 +118,24 @@ interface OllamaMessage {
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
-const normalize = (text: string) =>
-  text.toLowerCase().replace(/[\u2018\u2019]/g, "'").replace(/\s+/g, ' ').trim();
+const toSafeText = (value: unknown): string => {
+  if (typeof value === 'string') return value;
+  if (value === null || value === undefined) return '';
+  if (typeof value === 'object') {
+    const candidate = value as {content?: unknown; text?: unknown; message?: unknown};
+    const nested = candidate.content ?? candidate.text ?? candidate.message;
+    if (typeof nested === 'string') return nested;
+  }
+  return String(value);
+};
+
+const normalize = (text: unknown) =>
+  toSafeText(text).toLowerCase().replace(/[\u2018\u2019]/g, "'").replace(/\s+/g, ' ').trim();
 
 const includesAny = (text: string, keywords: string[]) =>
   keywords.some(kw => text.includes(kw));
 
-const containsDevanagari = (text: string) => /[\u0900-\u097F]/.test(text);
+const containsDevanagari = (text: unknown) => /[\u0900-\u097F]/.test(toSafeText(text));
 
 // ─── Comprehensive Hinglish (Romanized Hindi) Detection ──────────────────────
 const HINDI_WORDS = new Set([
@@ -201,7 +212,7 @@ const HINDI_BIGRAMS = [
   'save karo', 'save kar',
 ];
 
-const detectHinglish = (text: string): boolean => {
+const detectHinglish = (text: unknown): boolean => {
   const normalized = normalize(text);
   const words = normalized.split(/\s+/);
   
@@ -548,7 +559,7 @@ USER: ${userMessage}`;
     const messages: OllamaMessage[] = [
       ...history.map(msg => ({
         role: (msg.role === 'assistant' ? 'assistant' : 'user') as OllamaMessage['role'],
-        content: msg.content,
+        content: toSafeText(msg.content),
         ...(normalizeImageData(msg.image) ? {images: [normalizeImageData(msg.image)!]} : {}),
       })),
       {

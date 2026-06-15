@@ -16,6 +16,7 @@ export interface Message {
     intake: string;
     eligibility: string;
     careerOpportunities: string[];
+    level?: 'UG' | 'PG' | 'Diploma';
     matchScore: number;
   }>;
   timestamp: number;
@@ -46,6 +47,7 @@ export interface ChatResponse {
     intake: string;
     eligibility: string;
     careerOpportunities: string[];
+    level?: 'UG' | 'PG' | 'Diploma';
     matchScore: number;
   }>;
 }

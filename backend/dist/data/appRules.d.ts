@@ -5,5 +5,5 @@ export interface AppRule {
     text: string;
 }
 export declare const APP_RULES: AppRule[];
-export declare const findRelevantAppRules: (text: string, limit?: number) => AppRule[];
+export declare const findRelevantAppRules: (text: unknown, limit?: number) => AppRule[];
 //# sourceMappingURL=appRules.d.ts.map
