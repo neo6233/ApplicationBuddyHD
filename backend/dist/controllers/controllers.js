@@ -147,6 +147,7 @@ const getProgramsForRequestedLevel = (level) => {
 };
 const hasBachelorQualification = (text) => /\b(passed|completed|done|finished|have|holding)\s+(a\s+)?(bachelor|bachelor's|btech|b\.tech|b\.sc|bsc|b\.e|be|graduation|graduate)\b/i.test(text) ||
     /\b(bachelor's degree|bachelor degree|graduation completed|graduate with)\b/i.test(text);
+const hasSchoolOnlyQualification = (text) => hasSchoolQualification(text) && !hasBachelorQualification(text);
 const hasBachelorLevelQualification = (text) => includesAny(normalize(text), [
     'bachelor',
     "bachelor's",
@@ -317,23 +318,42 @@ const HINDI_BIGRAMS = [
     'mai ne', 'mein ne',
     'save karo', 'save kar',
 ];
+const AMBIGUOUS_HINGLISH_WORDS = new Set([
+    'hi',
+    'me',
+    'the',
+    'to',
+    'do',
+    'course',
+    'pass',
+    'ya',
+]);
 const detectHinglish = (text) => {
     const normalized = normalize(text);
-    const words = normalized.split(/\s+/);
+    const words = normalized
+        .split(/\s+/)
+        .map(word => word.replace(/[^a-z0-9.-]/g, ''))
+        .filter(Boolean);
     const bigramCount = HINDI_BIGRAMS.filter(bg => normalized.includes(bg)).length;
     if (bigramCount >= 1)
         return true;
     let hindiWordCount = 0;
+    let strongHindiWordCount = 0;
     for (const word of words) {
         if (HINDI_WORDS.has(word)) {
             hindiWordCount++;
+            if (!AMBIGUOUS_HINGLISH_WORDS.has(word)) {
+                strongHindiWordCount++;
+            }
         }
     }
-    if (words.length <= 5 && hindiWordCount >= 2)
+    if (strongHindiWordCount === 0)
+        return false;
+    if (words.length <= 5 && strongHindiWordCount >= 2)
         return true;
-    if (words.length > 5 && hindiWordCount >= 3)
+    if (words.length > 5 && strongHindiWordCount >= 2 && hindiWordCount >= 3)
         return true;
-    if (words.length > 0 && hindiWordCount / words.length >= 0.3)
+    if (words.length > 0 && strongHindiWordCount >= 2 && hindiWordCount / words.length >= 0.3)
         return true;
     return false;
 };
@@ -348,9 +368,12 @@ const detectResponseLanguage = (message, history) => {
     });
     if (recentHindi.length >= 1) {
         const normalized = normalize(message);
-        const words = normalized.split(/\s+/);
-        const anyHindiWord = words.some(w => HINDI_WORDS.has(w));
-        if (anyHindiWord)
+        const words = normalized
+            .split(/\s+/)
+            .map(word => word.replace(/[^a-z0-9.-]/g, ''))
+            .filter(Boolean);
+        const hasStrongHindiWord = words.some(w => HINDI_WORDS.has(w) && !AMBIGUOUS_HINGLISH_WORDS.has(w));
+        if (hasStrongHindiWord)
             return 'hi';
     }
     return 'en';
@@ -608,6 +631,12 @@ const getRecentlyRecommendedProgramNames = (history) => {
     });
     return names;
 };
+const filterProgramsForStudentProfile = (programs, userContext) => {
+    if (hasSchoolOnlyQualification(userContext)) {
+        return programs.filter(program => program.level === 'UG' || program.level === 'Diploma');
+    }
+    return programs;
+};
 const filterProgramsByLevel = (programs, message) => {
     const levelHint = inferLevel(message);
     if (levelHint === 'Any') {
@@ -778,7 +807,7 @@ Instructions:
 4. Previous assistant recommendations may be wrong. Do not copy or defend program names from earlier assistant replies.
 5. If there is no suitable catalog match, do not mention any previous catalog program as relevant. Say there is no direct match, then give useful general education paths from your knowledge, clearly labeling them as general options outside the current catalog.
 6. Do not repeat a previous generic course list. Ask at most one useful follow-up question.
-7. Reply in ${language === 'hi' ? 'natural Hindi/Hinglish' : 'English only'} using short paragraphs or a compact list.`;
+7. Reply in ${language === 'hi' ? 'natural Hindi/Hinglish because the latest user message is Hindi/Hinglish' : 'English only because the latest user message is English. Do not use Hindi words'} using short paragraphs or a compact list.`;
 };
 const buildNoCatalogMatchReply = (field, language) => {
     const isBiologyProfile = includesAny(normalize(field), ['biology', 'health', 'medical', 'pharmacy', 'nursing']);
@@ -1222,16 +1251,19 @@ const chatController = async (req, res) => {
             }
         }
         if (programContext.ambiguous) {
-            const level = inferLevel(`${cleanMessage} ${safeHistory.map(m => m.content).join(' ')}`);
+            const userContextOnly = `${cleanMessage} ${safeHistory.filter(m => m.role === 'user').map(m => m.content).join(' ')}`;
+            const level = hasSchoolOnlyQualification(userContextOnly)
+                ? 'UG'
+                : inferLevel(userContextOnly);
             if (level !== 'Any') {
-                const searchInput = `${cleanMessage} ${safeHistory.map(item => item.content).join(' ')}`;
-                const programs = ProgramService_1.default.search({
+                const searchInput = userContextOnly;
+                const programs = filterProgramsForStudentProfile(ProgramService_1.default.search({
                     qualification: searchInput,
                     gpa: '',
                     interests: searchInput,
                     preferredCountry: '',
                     targetLevel: level,
-                });
+                }), searchInput);
                 if (programs.length > 0) {
                     const recommendation = buildProgramRecommendationReply(programs, responseLanguage);
                     await sendResponse(res, cleanMessage, safeHistory, responseLanguage, {
@@ -1259,9 +1291,13 @@ const chatController = async (req, res) => {
         const localData = extractProfileLocally(cleanMessage, safeHistory);
         const combinedText = normalize(cleanMessage);
         const combinedUserText = normalize(cleanMessage);
+        const userHistoryText = safeHistory.filter(item => item.role === 'user').map(item => item.content).join(' ');
+        const userOnlyContext = `${userHistoryText} ${cleanMessage}`;
         const currentRequestedLevel = inferRequestedProgramLevel(cleanMessage);
-        const previousRequestedLevel = inferRequestedProgramLevel(safeHistory.map(item => item.content).join(' '));
-        const requestedLevel = currentRequestedLevel || previousRequestedLevel || (localData.level || undefined);
+        const previousRequestedLevel = inferRequestedProgramLevel(userHistoryText);
+        const requestedLevel = hasSchoolOnlyQualification(userOnlyContext)
+            ? 'UG'
+            : currentRequestedLevel || previousRequestedLevel || (localData.level || undefined);
         const relevantRules = (0, appRules_1.findRelevantAppRules)(`${combinedUserText} ${cleanMessage}`);
         const hasCourseContext = includesAny(combinedText, [
             'course',
@@ -1367,13 +1403,13 @@ const chatController = async (req, res) => {
             }
             // Have enough info — search catalog and explain matches
             const questionIntent = inferQuestionIntent(cleanMessage);
-            const allPrograms = ProgramService_1.default.search({
+            const allPrograms = filterProgramsForStudentProfile(ProgramService_1.default.search({
                 qualification: `${analysis.profile.qualification || ''} ${fullUserContext}`,
                 gpa: analysis.profile.score || '',
                 interests: analysis.profile.field || '',
                 preferredCountry: analysis.profile.country || '',
                 targetLevel: requestedLevel || 'Any',
-            });
+            }), fullUserContext);
             const compatiblePrograms = selectCompatiblePrograms(allPrograms, analysis.profile.field || '', fullUserContext);
             const recentNames = getRecentlyRecommendedProgramNames(safeHistory);
             const programs = questionIntent === 'alternative'

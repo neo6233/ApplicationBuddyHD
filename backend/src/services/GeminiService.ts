@@ -212,23 +212,42 @@ const HINDI_BIGRAMS = [
   'save karo', 'save kar',
 ];
 
+const AMBIGUOUS_HINGLISH_WORDS = new Set([
+  'hi',
+  'me',
+  'the',
+  'to',
+  'do',
+  'course',
+  'pass',
+  'ya',
+]);
+
 const detectHinglish = (text: unknown): boolean => {
   const normalized = normalize(text);
-  const words = normalized.split(/\s+/);
+  const words = normalized
+    .split(/\s+/)
+    .map(word => word.replace(/[^a-z0-9.-]/g, ''))
+    .filter(Boolean);
   
   const bigramCount = HINDI_BIGRAMS.filter(bg => normalized.includes(bg)).length;
   if (bigramCount >= 1) return true;
   
   let hindiWordCount = 0;
+  let strongHindiWordCount = 0;
   for (const word of words) {
     if (HINDI_WORDS.has(word)) {
       hindiWordCount++;
+      if (!AMBIGUOUS_HINGLISH_WORDS.has(word)) {
+        strongHindiWordCount++;
+      }
     }
   }
   
-  if (words.length <= 5 && hindiWordCount >= 2) return true;
-  if (words.length > 5 && hindiWordCount >= 3) return true;
-  if (words.length > 0 && hindiWordCount / words.length >= 0.3) return true;
+  if (strongHindiWordCount === 0) return false;
+  if (words.length <= 5 && strongHindiWordCount >= 2) return true;
+  if (words.length > 5 && strongHindiWordCount >= 2 && hindiWordCount >= 3) return true;
+  if (words.length > 0 && strongHindiWordCount >= 2 && hindiWordCount / words.length >= 0.3) return true;
   
   return false;
 };
@@ -244,9 +263,12 @@ const detectReplyLanguage = (userMessage: string, history: Array<{role: 'user' |
   });
   if (recentHindi.length >= 1) {
     const normalized = normalize(userMessage);
-    const words = normalized.split(/\s+/);
-    const anyHindiWord = words.some(w => HINDI_WORDS.has(w));
-    if (anyHindiWord) return 'hi';
+    const words = normalized
+      .split(/\s+/)
+      .map(word => word.replace(/[^a-z0-9.-]/g, ''))
+      .filter(Boolean);
+    const hasStrongHindiWord = words.some(w => HINDI_WORDS.has(w) && !AMBIGUOUS_HINGLISH_WORDS.has(w));
+    if (hasStrongHindiWord) return 'hi';
   }
 
   return 'en';
@@ -382,8 +404,8 @@ const buildLocalFallbackReply = (userMessage: string, language: 'hi' | 'en' = 'e
 
 const buildLanguageInstruction = (language: 'hi' | 'en'): string =>
   language === 'hi'
-    ? 'The user speaks Hindi/Hinglish. Reply in Hinglish (a natural mix of Hindi and English, using Devanagari script or clean Roman script) so it is easy for them to read. You can keep the program names in English (e.g. "Bachelor of Computer Science") but write the surrounding explanation/sentences in Hindi/Hinglish.'
-    : 'Answer ONLY in English. NO Hindi words. Pure English only.';
+    ? 'The latest user message is Hindi/Hinglish. Reply in Hinglish (a natural mix of Hindi and English, using Devanagari script or clean Roman script) so it is easy for them to read. You can keep program names in English, but write surrounding explanation/sentences in Hindi/Hinglish.'
+    : 'The latest user message is English. Answer ONLY in English. NO Hindi words. Do not continue Hindi from older chat history.';
 
 export const buildLocalProgramResponse = (data: ProgramFinderInput): ProgramFinderResponse => {
   const selected = [...PROGRAM_CATALOG]

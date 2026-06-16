@@ -98,6 +98,20 @@ const hasBachelorQualification = (text: string) =>
   /\b(passed|completed|done|finished|have|holding)\s+(a\s+)?(bachelor|bachelor's|btech|b\.tech|b\.sc|bsc|b\.e|be|graduation|graduate)\b/i.test(text) ||
   /\b(bachelor's degree|bachelor degree|graduation completed|graduate with)\b/i.test(text);
 
+const hasSchoolOnlyQualification = (text: string) =>
+  hasSchoolQualification(text) && !hasBachelorQualification(text);
+
+const filterProgramsForStudentProfile = (
+  programs: ProgramCatalogItem[],
+  userContext: string,
+) => {
+  if (hasSchoolOnlyQualification(userContext)) {
+    return programs.filter(program => program.level === 'UG' || program.level === 'Diploma');
+  }
+
+  return programs;
+};
+
 // Detect students who are below 12th grade (9th, 10th, 8th, etc.) — these are NOT eligible for catalog programs yet
 const hasBelowSecondaryQualification = (text: string): boolean => {
   const t = normalize(text);
@@ -284,9 +298,23 @@ const HINDI_BIGRAMS = [
   'save karo', 'save kar',
 ];
 
+const AMBIGUOUS_HINGLISH_WORDS = new Set([
+  'hi',
+  'me',
+  'the',
+  'to',
+  'do',
+  'course',
+  'pass',
+  'ya',
+]);
+
 const detectHinglish = (text: string): boolean => {
   const normalized = normalize(text);
-  const words = normalized.split(/\s+/);
+  const words = normalized
+    .split(/\s+/)
+    .map(word => word.replace(/[^a-z0-9.-]/g, ''))
+    .filter(Boolean);
   
   // Check for Hindi bigrams
   const bigramCount = HINDI_BIGRAMS.filter(bg => normalized.includes(bg)).length;
@@ -294,16 +322,21 @@ const detectHinglish = (text: string): boolean => {
   
   // Count how many words are Hindi
   let hindiWordCount = 0;
+  let strongHindiWordCount = 0;
   for (const word of words) {
     if (HINDI_WORDS.has(word)) {
       hindiWordCount++;
+      if (!AMBIGUOUS_HINGLISH_WORDS.has(word)) {
+        strongHindiWordCount++;
+      }
     }
   }
   
   // If 2+ Hindi words found in a short message, or 30%+ Hindi words in a longer message
-  if (words.length <= 5 && hindiWordCount >= 2) return true;
-  if (words.length > 5 && hindiWordCount >= 3) return true;
-  if (words.length > 0 && hindiWordCount / words.length >= 0.3) return true;
+  if (strongHindiWordCount === 0) return false;
+  if (words.length <= 5 && strongHindiWordCount >= 2) return true;
+  if (words.length > 5 && strongHindiWordCount >= 2 && hindiWordCount >= 3) return true;
+  if (words.length > 0 && strongHindiWordCount >= 2 && hindiWordCount / words.length >= 0.3) return true;
   
   return false;
 };
@@ -325,9 +358,12 @@ const detectResponseLanguage = (message: string, history: ConversationMessage[])
   if (recentHindi.length >= 1) {
     // If recent conversation was Hindi and current message has any Hindi words
     const normalized = normalize(message);
-    const words = normalized.split(/\s+/);
-    const anyHindiWord = words.some(w => HINDI_WORDS.has(w));
-    if (anyHindiWord) return 'hi';
+    const words = normalized
+      .split(/\s+/)
+      .map(word => word.replace(/[^a-z0-9.-]/g, ''))
+      .filter(Boolean);
+    const hasStrongHindiWord = words.some(w => HINDI_WORDS.has(w) && !AMBIGUOUS_HINGLISH_WORDS.has(w));
+    if (hasStrongHindiWord) return 'hi';
   }
   
   return 'en';
@@ -984,9 +1020,13 @@ YOUR TASK:
   const localData = extractProfileLocally(cleanMessage, safeHistory);
   const combinedText = normalize(cleanMessage);
   const combinedUserText = normalize(cleanMessage);
+  const userHistoryText = safeHistory.filter(item => item.role === 'user').map(item => item.content).join(' ');
+  const userOnlyContext = `${userHistoryText} ${cleanMessage}`;
   const currentRequestedLevel = inferRequestedProgramLevel(cleanMessage);
-  const previousRequestedLevel = inferRequestedProgramLevel(safeHistory.map(item => item.content).join(' '));
-  const requestedLevel = currentRequestedLevel || previousRequestedLevel || (localData.level || undefined);
+  const previousRequestedLevel = inferRequestedProgramLevel(userHistoryText);
+  const requestedLevel = hasSchoolOnlyQualification(userOnlyContext)
+    ? 'UG'
+    : currentRequestedLevel || previousRequestedLevel || (localData.level || undefined);
   const relevantRules = findRelevantAppRules(`${combinedUserText} ${cleanMessage}`);
   const hasCourseContext = includesAny(combinedText, [
     'course', 'courses', 'program', 'programs', 'degree', 'study', 'studies',
@@ -1067,13 +1107,13 @@ YOUR TASK:
     }
 
     // Have enough profile info — search catalog for matches
-    const allPrograms = ProgramService.search({
-      qualification: `${analysis.profile.qualification || ''} ${combinedUserText}`,
+    const allPrograms = filterProgramsForStudentProfile(ProgramService.search({
+      qualification: `${analysis.profile.qualification || ''} ${fullUserContext}`,
       gpa:           analysis.profile.score || '',
       interests:     analysis.profile.field || '',
       preferredCountry: analysis.profile.country || '',
       targetLevel:   requestedLevel || 'Any',
-    });
+    }), fullUserContext);
     const recentNames = getRecentlyRecommendedProgramNames(safeHistory);
     const questionIntent = inferQuestionIntent(cleanMessage);
     const filteredPrograms = questionIntent === 'alternative'

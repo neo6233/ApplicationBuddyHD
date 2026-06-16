@@ -3,11 +3,93 @@ import {Message, ChatRequest, ChatResponse} from '../../models/ChatModel';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import uuid from 'react-native-uuid';
 import ChatApi from '../../services/ChatApi';
-import {PROGRAM_CATALOG} from '../../data/programCatalog';
 
 const uuidv4 = () => uuid.v4() as string;
 
 const CHAT_STORAGE_KEY = '@aria_chat_history';
+
+const normalize = (text: string) => text.toLowerCase().replace(/\s+/g, ' ').trim();
+
+const hasSchoolQualification = (text: string) => {
+  const normalized = normalize(text);
+  return (
+    /\b(?:after\s+(?:my\s+)?|class\s*)12\b|\b12\s*(?:pass|standard|std|grade)\b/i.test(normalized) ||
+    ['12th', '12 pass', 'class 12', 'high school', 'secondary', 'intermediate'].some(keyword =>
+      normalized.includes(keyword),
+    )
+  );
+};
+
+const hasBachelorQualification = (text: string) =>
+  /\b(passed|completed|done|finished|have|holding)\s+(a\s+)?(bachelor|bachelor's|btech|b\.tech|b\.sc|bsc|b\.e|be|graduation|graduate)\b/i.test(text) ||
+  /\b(bachelor's degree|bachelor degree|graduation completed|graduate with)\b/i.test(text);
+
+const hasSchoolOnlyProfile = (messages: Message[]) => {
+  const userContext = messages
+    .filter(message => message.role === 'user')
+    .map(message => message.content)
+    .join(' ');
+
+  return hasSchoolQualification(userContext) && !hasBachelorQualification(userContext);
+};
+
+const sanitizeProgramsForProfile = (
+  programs: Message['programs'] | undefined,
+  messages: Message[],
+) => {
+  if (!programs?.length) {
+    return undefined;
+  }
+
+  if (!hasSchoolOnlyProfile(messages)) {
+    return programs;
+  }
+
+  const filtered = programs.filter(program => program.level !== 'PG');
+  return filtered.length ? filtered : undefined;
+};
+
+const buildSanitizedReply = (
+  originalReply: string,
+  originalPrograms: Message['programs'] | undefined,
+  filteredPrograms: Message['programs'] | undefined,
+  language?: 'hi' | 'en',
+) => {
+  if (!originalPrograms?.length || filteredPrograms?.length === originalPrograms.length) {
+    return originalReply;
+  }
+
+  if (!filteredPrograms?.length) {
+    return language === 'hi'
+      ? '12th ke baad direct master/PG course eligible nahi hota. Pehle undergraduate ya diploma course choose karein.'
+      : 'After 12th, master/PG courses are not eligible directly. Please choose an undergraduate or diploma course first.';
+  }
+
+  return language === 'hi'
+    ? '12th profile ke basis par ye undergraduate/diploma courses suitable hain:'
+    : 'Based on your 12th profile, these undergraduate/diploma courses are suitable:';
+};
+
+const sanitizeStoredMessages = (messages: Message[]) =>
+  messages.map(message => {
+    if (message.role !== 'assistant' || !message.programs?.length) {
+      return message;
+    }
+
+    const messagesUpToCurrent = messages.slice(0, messages.indexOf(message));
+    const sanitizedPrograms = sanitizeProgramsForProfile(message.programs, messagesUpToCurrent);
+
+    return {
+      ...message,
+      content: buildSanitizedReply(
+        message.content,
+        message.programs,
+        sanitizedPrograms,
+        message.responseLanguage,
+      ),
+      programs: sanitizedPrograms,
+    };
+  });
 
 interface ChatState {
   messages: Message[];
@@ -132,13 +214,19 @@ const chatSlice = createSlice({
         timestamp?: number;
       }>,
     ) => {
+      const sanitizedPrograms = sanitizeProgramsForProfile(action.payload.programs, state.messages);
       state.messages.push({
         id: uuidv4(),
         role: 'assistant',
-        content: action.payload.content,
+        content: buildSanitizedReply(
+          action.payload.content,
+          action.payload.programs,
+          sanitizedPrograms,
+          action.payload.responseLanguage,
+        ),
         responseLanguage: action.payload.responseLanguage,
         responseType: action.payload.responseType,
-        programs: action.payload.programs?.length ? action.payload.programs : undefined,
+        programs: sanitizedPrograms,
         timestamp: action.payload.timestamp || Date.now(),
       });
       saveToChatStorage(state.messages);
@@ -153,9 +241,10 @@ const chatSlice = createSlice({
   extraReducers: builder => {
     builder
       .addCase(loadChatHistory.fulfilled, (state, action) => {
-        state.messages = action.payload;
-        state.totalChats = action.payload.filter(m => m.role === 'user').length;
-        state.hydratedMessageCount = action.payload.length;
+        const sanitizedMessages = sanitizeStoredMessages(action.payload);
+        state.messages = sanitizedMessages;
+        state.totalChats = sanitizedMessages.filter(m => m.role === 'user').length;
+        state.hydratedMessageCount = sanitizedMessages.length;
       })
       .addCase(sendMessage.pending, state => {
         state.loading = true;
@@ -179,13 +268,19 @@ const chatSlice = createSlice({
       .addCase(sendMessage.fulfilled, (state, action) => {
         state.loading = false;
         state.isTyping = false;
+        const sanitizedPrograms = sanitizeProgramsForProfile(action.payload.programs, state.messages);
         state.messages.push({
           id: uuidv4(),
           role: 'assistant',
-          content: action.payload.reply,
+          content: buildSanitizedReply(
+            action.payload.reply,
+            action.payload.programs,
+            sanitizedPrograms,
+            action.payload.responseLanguage,
+          ),
           responseLanguage: action.payload.responseLanguage,
           responseType: action.payload.responseType,
-          programs: action.payload.programs?.length ? action.payload.programs : undefined,
+          programs: sanitizedPrograms,
           timestamp: action.payload.timestamp,
         });
         saveToChatStorage(state.messages);

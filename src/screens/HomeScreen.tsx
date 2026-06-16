@@ -1,4 +1,4 @@
-import React, {useEffect, useRef} from 'react';
+import React, {useEffect, useMemo, useRef} from 'react';
 import {
   View,
   Text,
@@ -18,6 +18,7 @@ import GradientBackground from '../components/GradientBackground';
 
 const {width} = Dimensions.get('window');
 const CARD_WIDTH = (width - 48) / 2;
+const GRAPH_BAR_MAX_WIDTH = width - 156;
 
 type Props = {
   navigation: NativeStackNavigationProp<RootStackParamList, 'Home'>;
@@ -67,9 +68,36 @@ const FEATURE_CARDS: FeatureCard[] = [
   },
 ];
 
+const getGraphScore = (matchScore: number | undefined, index: number) => {
+  if (typeof matchScore === 'number' && matchScore > 0) {
+    return Math.max(35, Math.min(98, Math.round(matchScore)));
+  }
+
+  return Math.max(55, 90 - index * 9);
+};
+
 const HomeScreen: React.FC<Props> = ({navigation}) => {
   const totalChats = useAppSelector(s => s.chat.totalChats);
+  const messages = useAppSelector(s => s.chat.messages);
   const savedPrograms = useAppSelector(s => s.programs.savedPrograms.length);
+  const recommendationGraph = useMemo(() => {
+    const latestRecommendation = [...messages]
+      .reverse()
+      .find(
+        message =>
+          message.role === 'assistant' &&
+          message.programs?.length &&
+          (message.responseType === 'recommendation' ||
+            message.responseType === 'final_recommendation' ||
+            !message.responseType),
+      );
+
+    return (latestRecommendation?.programs || []).slice(0, 4).map((program, index) => ({
+      name: program.name,
+      country: program.country,
+      score: getGraphScore(program.matchScore, index),
+    }));
+  }, [messages]);
 
   const fadeIn = useRef(new Animated.Value(0)).current;
   const slideUp = useRef(new Animated.Value(20)).current;
@@ -168,22 +196,52 @@ const HomeScreen: React.FC<Props> = ({navigation}) => {
           ))}
         </View>
 
-        {/* CTA Banner — Gradient style */}
-        <TouchableOpacity
-          style={styles.ctaBanner}
-          onPress={() => navigation.navigate('Chat')}
-          activeOpacity={0.85}>
-          <View style={styles.ctaBannerGlow} />
-          <View style={styles.ctaLeft}>
-            <Text style={styles.ctaTitle}>Chat with ARIA</Text>
-            <Text style={styles.ctaSubtitle}>
-              Get instant personalised guidance
-            </Text>
+        {recommendationGraph.length > 0 && (
+          <View style={styles.graphCard}>
+            <View style={styles.graphHeader}>
+              <View>
+                <Text style={styles.graphTitle}>Course Suitability</Text>
+                <Text style={styles.graphSubtitle}>Latest ARIA recommendation</Text>
+              </View>
+              <Text style={styles.graphBadge}>{recommendationGraph.length}</Text>
+            </View>
+
+            <View style={styles.graphRows}>
+              {recommendationGraph.map((program, index) => {
+                const barWidth = Math.max(38, (GRAPH_BAR_MAX_WIDTH * program.score) / 100);
+                return (
+                  <View key={`${program.name}-${index}`} style={styles.graphRow}>
+                    <View style={styles.graphLabelWrap}>
+                      <Text style={styles.graphCourseName} numberOfLines={1}>
+                        {program.name}
+                      </Text>
+                      <Text style={styles.graphCourseCountry} numberOfLines={1}>
+                        {program.country}
+                      </Text>
+                    </View>
+                    <View style={styles.graphTrack}>
+                      <View
+                        style={[
+                          styles.graphBar,
+                          {
+                            width: barWidth,
+                            backgroundColor:
+                              index === 0
+                                ? Colors.accent
+                                : index === 1
+                                ? Colors.cardProgramFinder
+                                : Colors.cardEligibility,
+                          },
+                        ]}
+                      />
+                    </View>
+                    <Text style={styles.graphScore}>{program.score}%</Text>
+                  </View>
+                );
+              })}
+            </View>
           </View>
-          <View style={styles.ctaIcon}>
-            <Text style={styles.ctaIconText}>💬</Text>
-          </View>
-        </TouchableOpacity>
+        )}
 
       </ScrollView>
     </GradientBackground>
@@ -353,53 +411,89 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
   },
-  ctaBanner: {
+  graphCard: {
     marginHorizontal: 16,
     backgroundColor: Colors.glass,
     borderRadius: 18,
-    padding: 20,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
+    padding: 18,
     borderWidth: 1,
     borderColor: Colors.glassBorder,
     overflow: 'hidden',
     position: 'relative',
   },
-  ctaBannerGlow: {
-    position: 'absolute',
-    top: -40,
-    left: -20,
-    width: 120,
-    height: 120,
-    borderRadius: 60,
-    backgroundColor: 'rgba(139, 92, 246, 0.08)',
+  graphHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 16,
   },
-  ctaLeft: {
-    flex: 1,
-  },
-  ctaTitle: {
+  graphTitle: {
     fontSize: 17,
     fontWeight: '700',
     color: Colors.textPrimary,
-    marginBottom: 4,
   },
-  ctaSubtitle: {
-    fontSize: 13,
+  graphSubtitle: {
+    fontSize: 12,
     color: Colors.textSecondary,
+    marginTop: 3,
   },
-  ctaIcon: {
-    width: 48,
-    height: 48,
-    borderRadius: 14,
-    backgroundColor: 'rgba(139, 92, 246, 0.15)',
-    alignItems: 'center',
-    justifyContent: 'center',
+  graphBadge: {
+    minWidth: 34,
+    height: 34,
+    borderRadius: 12,
+    backgroundColor: 'rgba(139, 92, 246, 0.16)',
     borderWidth: 1,
     borderColor: Colors.glassBorder,
+    color: Colors.accent,
+    fontSize: 16,
+    fontWeight: '800',
+    textAlign: 'center',
+    lineHeight: 32,
   },
-  ctaIconText: {
-    fontSize: 22,
+  graphRows: {
+    gap: 12,
+  },
+  graphRow: {
+    minHeight: 44,
+  },
+  graphLabelWrap: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 7,
+  },
+  graphCourseName: {
+    flex: 1,
+    fontSize: 12,
+    fontWeight: '700',
+    color: Colors.textPrimary,
+    marginRight: 10,
+  },
+  graphCourseCountry: {
+    maxWidth: 88,
+    fontSize: 11,
+    color: Colors.textMuted,
+  },
+  graphTrack: {
+    height: 9,
+    borderRadius: 5,
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    overflow: 'hidden',
+    marginRight: 46,
+  },
+  graphBar: {
+    height: 9,
+    borderRadius: 5,
+  },
+  graphScore: {
+    position: 'absolute',
+    right: 0,
+    bottom: -2,
+    width: 40,
+    fontSize: 11,
+    fontWeight: '700',
+    color: Colors.textSecondary,
+    textAlign: 'right',
   },
 });
 
