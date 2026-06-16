@@ -627,8 +627,9 @@ Student: qualification=${data.qualification}, percentage=${data.percentage}, eng
 Rules:
 1. English score is optional. Do not treat a missing English score as a hard rejection.
 2. Use targetLevel to decide which catalog level to focus on. If targetLevel is PG, recommend postgraduate options only. If targetLevel is UG, recommend undergraduate options only.
-3. If qualification indicates bachelor/graduation, do not return bachelor programs as eligible next-step options.
-4. Status: eligible | conditional | not_eligible. Give the 3 best eligible/conditional matches and 2 not-eligible examples.`;
+3. If qualification indicates 12th/high school/secondary only, do not mark master's/postgraduate programs eligible.
+4. If qualification indicates bachelor/graduation, do not return bachelor programs as eligible next-step options.
+5. Status: eligible | conditional | not_eligible. Give the 3 best eligible/conditional matches and 2 not-eligible examples.`;
 
     return this.callOllama({
       systemPrompt: 'You are ARIA, a thoughtful admissions advisor. Use the catalog, think through the student profile, and return JSON only.',

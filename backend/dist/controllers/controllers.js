@@ -80,6 +80,32 @@ const isAlternativeReasonQuestion = (text) => {
         'reason',
     ]);
 };
+const isCivilServiceQuestion = (text) => {
+    const normalized = normalize(text);
+    return includesAny(normalized, [
+        'ias',
+        'pcs',
+        'upsc',
+        'civil service',
+        'civil services',
+        'public service commission',
+        'state pcs',
+    ]);
+};
+const buildCivilServiceReply = (language) => {
+    if (language === 'hi') {
+        return [
+            'IAS/PCS ke liye aap kisi bhi recognized bachelor degree ke baad eligible hote hain. 12th ke baad pehle graduation complete karein.',
+            'Best path: 1. 12th ke baad BA/BSc/BCom/BBA ya koi bhi degree choose karein. 2. Graduation ke saath NCERT, current affairs, polity, history, geography, economy aur aptitude prepare karein. 3. UPSC/State PCS syllabus aur previous year papers follow karein.',
+            'Agar aap abhi 12th ke baad course choose kar rahe hain, BA Political Science, History, Public Administration, Economics, Sociology, ya BSc/BCom bhi useful ho sakte hain. Mere app catalog mein direct IAS/PCS course nahi hai, but bachelor degree planning mein main help kar sakta hoon.',
+        ].join('\n\n');
+    }
+    return [
+        'For IAS/PCS, you first need to complete a recognized bachelor degree. You cannot apply directly after 12th.',
+        'Best path: 1. Choose any bachelor degree after 12th. 2. Alongside graduation, prepare NCERTs, current affairs, polity, history, geography, economy, and aptitude. 3. Follow the UPSC or State PCS syllabus and previous year papers.',
+        'Helpful bachelor subjects include Political Science, History, Public Administration, Economics, Sociology, BA, BSc, BCom, or BBA. My app catalog does not have a direct IAS/PCS program, but I can help you choose a suitable bachelor path.',
+    ].join('\n\n');
+};
 const inferRequestedProgramLevel = (text) => {
     const normalized = normalize(text);
     if (includesAny(normalized, ['master', 'masters', 'msc', 'mtech', 'mba', 'postgraduate', 'pg course'])) {
@@ -121,6 +147,20 @@ const getProgramsForRequestedLevel = (level) => {
 };
 const hasBachelorQualification = (text) => /\b(passed|completed|done|finished|have|holding)\s+(a\s+)?(bachelor|bachelor's|btech|b\.tech|b\.sc|bsc|b\.e|be|graduation|graduate)\b/i.test(text) ||
     /\b(bachelor's degree|bachelor degree|graduation completed|graduate with)\b/i.test(text);
+const hasBachelorLevelQualification = (text) => includesAny(normalize(text), [
+    'bachelor',
+    "bachelor's",
+    'bachelors',
+    'btech',
+    'b.tech',
+    'b.sc',
+    'bsc',
+    'bba',
+    'b.e',
+    'graduation',
+    'graduate',
+    'undergraduate degree',
+]);
 const inferLevel = (text) => {
     const t = normalize(text);
     if (includesAny(t, ['phd', 'doctorate', 'dr.']))
@@ -145,10 +185,15 @@ const inferLevel = (text) => {
     return 'Any';
 };
 const inferEligibilityTargetLevel = (qualification) => {
-    const currentLevel = inferLevel(qualification);
-    if (currentLevel === 'UG') {
+    const normalized = normalize(qualification);
+    const schoolLevelOnly = hasSchoolQualification(normalized) && !hasBachelorLevelQualification(normalized);
+    if (schoolLevelOnly) {
+        return 'UG';
+    }
+    if (hasBachelorLevelQualification(normalized)) {
         return 'PG';
     }
+    const currentLevel = inferLevel(qualification);
     if (currentLevel === 'Diploma') {
         return 'UG';
     }
@@ -881,9 +926,15 @@ const parseEligibilityJson = (rawResult) => {
         throw new Error('Invalid eligibility JSON');
     }
 };
+const SCHOOL_PASS_PERCENTAGE = 35;
+const isFailingAcademicScore = (scoreValue) => scoreValue !== undefined && scoreValue < SCHOOL_PASS_PERCENTAGE;
 const sanitizeEligibilityResult = (result, qualification, percentage, englishScore, workExperience) => {
     const targetLevel = inferEligibilityTargetLevel(qualification);
     const localFallback = buildLocalEligibilityResult(qualification, percentage, englishScore, workExperience);
+    const scoreValue = parseScoreValue(percentage);
+    if (isFailingAcademicScore(scoreValue)) {
+        return localFallback;
+    }
     const isEligibleStatus = (status) => status === 'eligible' || status === 'conditional';
     const mapCatalogCourse = (course, fallbackStatus) => {
         const catalogItem = programCatalog_1.PROGRAM_CATALOG.find(program => normalize(program.name) === normalize(course?.name));
@@ -921,12 +972,12 @@ const sanitizeEligibilityResult = (result, qualification, percentage, englishSco
     if (eligibleCourses.length === 0 && notEligibleCourses.length === 0) {
         return localFallback;
     }
-    const summary = typeof result?.summary === 'string' && result.summary.trim().length > 0
-        ? result.summary
-        : localFallback.summary;
-    const recommendations = Array.isArray(result?.recommendations)
-        ? result.recommendations.filter((item) => typeof item === 'string' && item.trim().length > 0)
-        : localFallback.recommendations;
+    const summary = eligibleCourses.length > 0
+        ? 'These programs best match your current profile.'
+        : typeof result?.summary === 'string' && result.summary.trim().length > 0
+            ? result.summary
+            : localFallback.summary;
+    const recommendations = eligibleCourses.map((course) => course.name);
     return {
         eligibleCourses,
         notEligibleCourses,
@@ -987,6 +1038,22 @@ const buildLocalEligibilityResult = (qualification, percentage, englishScore, wo
     const candidatePrograms = targetLevel === 'Any'
         ? programCatalog_1.PROGRAM_CATALOG
         : programCatalog_1.PROGRAM_CATALOG.filter(program => program.level === targetLevel);
+    if (isFailingAcademicScore(scoreValue)) {
+        const notEligible = candidatePrograms.slice(0, 3).map(program => ({
+            name: program.name,
+            university: program.university,
+            country: program.country,
+            minimumRequirement: program.eligibility,
+            status: 'not_eligible',
+            reason: `Your ${scoreValue}% score is below the usual ${SCHOOL_PASS_PERCENTAGE}% pass mark, so you need to clear 12th before applying.`,
+        }));
+        return {
+            eligibleCourses: [],
+            notEligibleCourses: notEligible,
+            summary: `A ${scoreValue}% score is below the usual pass mark. Please clear 12th or improve your result before applying to these programs.`,
+            recommendations: [],
+        };
+    }
     const scoredPrograms = candidatePrograms.map(program => {
         let score = 0;
         if (qualificationText.includes('computer') || qualificationText.includes('science') || qualificationText.includes('it')) {
@@ -1366,7 +1433,10 @@ const programFinderController = async (req, res) => {
             interests: interests || '',
             preferredCountry: preferredCountry || '',
         });
-        const summary = await GeminiService_1.default.chat(`You are ARIA. In one short sentence, explain why these programs fit the student's profile.
+        const scoreValue = parseScoreValue(gpa || '');
+        const summary = isFailingAcademicScore(scoreValue)
+            ? `Your ${scoreValue}% score is below the usual ${SCHOOL_PASS_PERCENTAGE}% pass mark. These programs are only options to explore after you clear 12th or improve your result.`
+            : await GeminiService_1.default.chat(`You are ARIA. In one short sentence, explain why these programs fit the student's profile.
 Profile: ${JSON.stringify(userProfileAnalysis?.profile || {})}
 Programs: ${JSON.stringify(programs.map(p => ({ name: p.name, level: p.level, field: p.fields, country: p.country })))}`, [], { temperature: 0.2, maxOutputTokens: 80 });
         res.json({

@@ -31,6 +31,15 @@ const normalize = (text: unknown) =>
 const includesAny = (text: string, keywords: string[]) =>
   keywords.some(keyword => text.includes(keyword));
 
+const hasSchoolQualification = (text: string) =>
+  includesAny(text, ['high school', 'secondary', '12th', '12 pass', 'class 12', '10th', '10 pass', 'intermediate']) ||
+  /\b(?:after\s+(?:my\s+)?|class\s*)12\b|\b12\s*(?:pass|standard|std|grade)\b/i.test(text);
+
+const hasBachelorQualification = (text: string) =>
+  includesAny(text, ['bachelor', "bachelor's", 'bachelors', 'btech', 'b.tech', 'b.sc', 'bsc', 'bba', 'b.e', 'graduation', 'graduate']);
+
+const SCHOOL_PASS_PERCENTAGE = 35;
+
 const parseNumericScore = (input: string): number | undefined => {
   const normalized = normalize(input);
   const percentageMatch = normalized.match(/(\d{1,3}(?:\.\d{1,2})?)\s*%/);
@@ -59,8 +68,8 @@ const inferQualificationLevel = (qualification: string): ProgramLevel | 'Any' =>
   if (includesAny(text, ['phd', 'doctorate'])) return 'PG';
   if (includesAny(text, ['master', 'msc', 'ma', 'mtech', 'mba', 'pg'])) return 'PG';
   if (includesAny(text, ['diploma', 'certificate'])) return 'Diploma';
-  if (includesAny(text, ['bachelor', 'be', 'btech', 'b.sc', 'bba', 'undergraduate'])) return 'UG';
-  if (includesAny(text, ['high school', 'secondary', '12th', '10th'])) return 'UG';
+  if (hasBachelorQualification(text) || includesAny(text, ['undergraduate'])) return 'UG';
+  if (hasSchoolQualification(text)) return 'UG';
   return 'Any';
 };
 
@@ -96,9 +105,14 @@ class ProgramService {
     console.log('[PROGRAM SEARCH FILTER]', filters);
 
     const { qualification, gpa, interests, preferredCountry } = filters;
-    const targetLevel = filters.targetLevel && filters.targetLevel !== 'Any'
+    const qualificationText = normalize(qualification || '');
+    const inferredTargetLevel = inferTargetLevel(`${interests || ''} ${qualification || ''}`);
+    const schoolLevelOnly = hasSchoolQualification(qualificationText) && !hasBachelorQualification(qualificationText);
+    const targetLevel = schoolLevelOnly && inferredTargetLevel !== 'Diploma'
+      ? 'UG'
+      : filters.targetLevel && filters.targetLevel !== 'Any'
       ? filters.targetLevel
-      : inferTargetLevel(`${interests || ''} ${qualification || ''}`);
+      : inferredTargetLevel;
 
     const candidateCatalog = targetLevel !== 'Any'
       ? PROGRAM_CATALOG.filter(item => item.level === targetLevel)
@@ -174,11 +188,19 @@ class ProgramService {
       }
     }
 
+    if (score !== undefined && score < SCHOOL_PASS_PERCENTAGE) {
+      total -= 50;
+    }
+
     if (
       qualificationText &&
       item.minQualificationKeywords.some((keyword: string) => qualificationText.includes(keyword))
     ) {
       total += 10;
+    }
+
+    if (score !== undefined && score < SCHOOL_PASS_PERCENTAGE) {
+      return 35;
     }
 
     return Math.max(35, Math.min(98, total));

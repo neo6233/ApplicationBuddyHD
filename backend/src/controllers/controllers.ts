@@ -178,6 +178,22 @@ const hasBachelorQualification = (text: string) =>
   /\b(passed|completed|done|finished|have|holding)\s+(a\s+)?(bachelor|bachelor's|btech|b\.tech|b\.sc|bsc|b\.e|be|graduation|graduate)\b/i.test(text) ||
   /\b(bachelor's degree|bachelor degree|graduation completed|graduate with)\b/i.test(text);
 
+const hasBachelorLevelQualification = (text: string) =>
+  includesAny(normalize(text), [
+    'bachelor',
+    "bachelor's",
+    'bachelors',
+    'btech',
+    'b.tech',
+    'b.sc',
+    'bsc',
+    'bba',
+    'b.e',
+    'graduation',
+    'graduate',
+    'undergraduate degree',
+  ]);
+
 const inferLevel = (text: string): 'UG' | 'PG' | 'Diploma' | 'Any' => {
   const t = normalize(text);
   if (includesAny(t, ['phd', 'doctorate', 'dr.'])) return 'PG';
@@ -194,11 +210,18 @@ const inferLevel = (text: string): 'UG' | 'PG' | 'Diploma' | 'Any' => {
 };
 
 const inferEligibilityTargetLevel = (qualification: string): 'UG' | 'PG' | 'Diploma' | 'Any' => {
-  const currentLevel = inferLevel(qualification);
+  const normalized = normalize(qualification);
+  const schoolLevelOnly = hasSchoolQualification(normalized) && !hasBachelorLevelQualification(normalized);
 
-  if (currentLevel === 'UG') {
+  if (schoolLevelOnly) {
+    return 'UG';
+  }
+
+  if (hasBachelorLevelQualification(normalized)) {
     return 'PG';
   }
+
+  const currentLevel = inferLevel(qualification);
 
   if (currentLevel === 'Diploma') {
     return 'UG';
@@ -1082,6 +1105,11 @@ const parseEligibilityJson = (rawResult: string) => {
   }
 };
 
+const SCHOOL_PASS_PERCENTAGE = 35;
+
+const isFailingAcademicScore = (scoreValue: number | undefined) =>
+  scoreValue !== undefined && scoreValue < SCHOOL_PASS_PERCENTAGE;
+
 const sanitizeEligibilityResult = (
   result: any,
   qualification: string,
@@ -1091,6 +1119,11 @@ const sanitizeEligibilityResult = (
 ) => {
   const targetLevel = inferEligibilityTargetLevel(qualification);
   const localFallback = buildLocalEligibilityResult(qualification, percentage, englishScore, workExperience);
+  const scoreValue = parseScoreValue(percentage);
+
+  if (isFailingAcademicScore(scoreValue)) {
+    return localFallback;
+  }
 
   const isEligibleStatus = (status: unknown): status is 'eligible' | 'conditional' =>
     status === 'eligible' || status === 'conditional';
@@ -1137,13 +1170,13 @@ const sanitizeEligibilityResult = (
     return localFallback;
   }
 
-  const summary = typeof result?.summary === 'string' && result.summary.trim().length > 0
-    ? result.summary
-    : localFallback.summary;
+  const summary = eligibleCourses.length > 0
+    ? 'These programs best match your current profile.'
+    : typeof result?.summary === 'string' && result.summary.trim().length > 0
+      ? result.summary
+      : localFallback.summary;
 
-  const recommendations = Array.isArray(result?.recommendations)
-    ? result.recommendations.filter((item: unknown) => typeof item === 'string' && item.trim().length > 0)
-    : localFallback.recommendations;
+  const recommendations = eligibleCourses.map((course: any) => course.name);
 
   return {
     eligibleCourses,
@@ -1232,6 +1265,24 @@ const buildLocalEligibilityResult = (qualification: string, percentage: string, 
   const candidatePrograms = targetLevel === 'Any'
     ? PROGRAM_CATALOG
     : PROGRAM_CATALOG.filter(program => program.level === targetLevel);
+
+  if (isFailingAcademicScore(scoreValue)) {
+    const notEligible = candidatePrograms.slice(0, 3).map(program => ({
+      name: program.name,
+      university: program.university,
+      country: program.country,
+      minimumRequirement: program.eligibility,
+      status: 'not_eligible' as const,
+      reason: `Your ${scoreValue}% score is below the usual ${SCHOOL_PASS_PERCENTAGE}% pass mark, so you need to clear 12th before applying.`,
+    }));
+
+    return {
+      eligibleCourses: [],
+      notEligibleCourses: notEligible,
+      summary: `A ${scoreValue}% score is below the usual pass mark. Please clear 12th or improve your result before applying to these programs.`,
+      recommendations: [],
+    };
+  }
 
   const scoredPrograms = candidatePrograms.map(program => {
     let score = 0;
@@ -1678,13 +1729,16 @@ export const programFinderController = async (req: Request, res: Response) => {
       preferredCountry: preferredCountry || '',
     });
 
-    const summary = await OllamaService.chat(
-      `You are ARIA. In one short sentence, explain why these programs fit the student's profile.
+    const scoreValue = parseScoreValue(gpa || '');
+    const summary = isFailingAcademicScore(scoreValue)
+      ? `Your ${scoreValue}% score is below the usual ${SCHOOL_PASS_PERCENTAGE}% pass mark. These programs are only options to explore after you clear 12th or improve your result.`
+      : await OllamaService.chat(
+        `You are ARIA. In one short sentence, explain why these programs fit the student's profile.
 Profile: ${JSON.stringify(userProfileAnalysis?.profile || {})}
 Programs: ${JSON.stringify(programs.map(p => ({name: p.name, level: p.level, field: p.fields, country: p.country})))}`,
-      [],
-      {temperature: 0.2, maxOutputTokens: 80},
-    );
+        [],
+        {temperature: 0.2, maxOutputTokens: 80},
+      );
 
     res.json({
       programs,
