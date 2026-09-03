@@ -25,6 +25,15 @@ const hasBachelorQualification = (text: string) =>
 
 const SCHOOL_PASS_PERCENTAGE = 35;
 
+const COUNTRY_ALIASES: Record<string, string[]> = {
+  uk: ['uk', 'united kingdom', 'england', 'britain', 'great britain'],
+  usa: ['usa', 'us', 'united states', 'america'],
+  canada: ['canada'],
+  australia: ['australia'],
+  'new zealand': ['new zealand', 'nz'],
+  germany: ['germany'],
+};
+
 const parseNumericScore = (input: string): number | undefined => {
   const normalized = normalize(input);
   const percentageMatch = normalized.match(/(\d{1,3}(?:\.\d{1,2})?)\s*%/);
@@ -44,9 +53,18 @@ const parseNumericScore = (input: string): number | undefined => {
 const inferQualificationLevel = (qualification: string): ProgramLevel | 'Any' => {
   const text = normalize(qualification);
   if (includesAny(text, ['phd', 'doctorate'])) return 'PG';
-  if (includesAny(text, ['master', 'msc', 'ma', 'mtech', 'mba', 'pg'])) return 'PG';
+  if (includesAny(text, ['master', 'msc', 'mtech', 'mba', 'postgraduate', 'post graduate']) || /\b(?:ma|pg)\b/i.test(text)) return 'PG';
   if (includesAny(text, ['diploma', 'certificate'])) return 'Diploma';
   if (hasBachelorQualification(text) || includesAny(text, ['undergraduate'])) return 'UG';
+  if (hasSchoolQualification(text)) return 'UG';
+  return 'Any';
+};
+
+const inferNextLevelFromQualification = (qualification: string): ProgramLevel | 'Any' => {
+  const text = normalize(qualification);
+  if (hasBachelorQualification(text) || includesAny(text, ['undergraduate'])) return 'PG';
+  if (includesAny(text, ['master', 'msc', 'mtech', 'mba', 'postgraduate', 'post graduate']) || /\b(?:ma|pg)\b/i.test(text)) return 'PG';
+  if (includesAny(text, ['diploma', 'certificate'])) return 'UG';
   if (hasSchoolQualification(text)) return 'UG';
   return 'Any';
 };
@@ -60,11 +78,26 @@ const inferTargetLevel = (text: string): ProgramLevel | 'Any' => {
   return 'Any';
 };
 
+const countryMatches = (programCountry: string, preferredCountry: string): boolean => {
+  const preferred = normalize(preferredCountry);
+  const catalogCountry = normalize(programCountry);
+
+  if (!preferred) return false;
+  if (catalogCountry.includes(preferred) || preferred.includes(catalogCountry)) return true;
+
+  return Object.values(COUNTRY_ALIASES).some(
+    aliases =>
+      aliases.includes(catalogCountry) &&
+      aliases.some(alias => preferred.includes(alias)),
+  );
+};
+
 const inferField = (text: string): string | undefined => {
   const normalized = normalize(text);
   const patterns: Array<{keywords: string[]; value: string}> = [
-    {keywords: ['computer science', 'software', 'programmer', 'developer', 'engineer', 'it', 'technology', 'coding'], value: 'technology'},
+    {keywords: ['physics chemistry mathematics', 'physics chemistry and mathematics', 'pcm', 'physics', 'chemistry', 'mathematics', 'maths', 'math'], value: 'math_science'},
     {keywords: ['data science', 'machine learning', 'ai', 'artificial intelligence', 'analytics'], value: 'data'},
+    {keywords: ['computer science', 'software', 'programmer', 'developer', 'engineer', 'it', 'technology', 'coding'], value: 'technology'},
     {keywords: ['business', 'management', 'commerce', 'finance', 'marketing', 'mba', 'bba'], value: 'business'},
     {keywords: ['engineering', 'civil', 'mechanical', 'electrical', 'electronics', 'chemical'], value: 'engineering'},
     {keywords: ['healthcare', 'nursing', 'pharmacy', 'medical', 'biology', 'doctor', 'nurse'], value: 'health'},
@@ -80,23 +113,33 @@ class ProgramService {
   search(filters: ProgramSearchFilters): ProgramCatalogItem[] {
     const {qualification, gpa, interests, preferredCountry} = filters;
     const qualificationText = normalize(qualification || '');
-    const inferredTargetLevel = inferTargetLevel(`${interests || ''} ${qualification || ''}`);
+    const inferredTargetLevel = inferTargetLevel(interests || '');
+    const qualificationNextLevel = inferNextLevelFromQualification(qualification || '');
     const schoolLevelOnly = hasSchoolQualification(qualificationText) && !hasBachelorQualification(qualificationText);
     const targetLevel = schoolLevelOnly && inferredTargetLevel !== 'Diploma'
       ? 'UG'
       : filters.targetLevel && filters.targetLevel !== 'Any'
       ? filters.targetLevel
-      : inferredTargetLevel;
+      : inferredTargetLevel !== 'Any'
+      ? inferredTargetLevel
+      : qualificationNextLevel;
 
-    const candidateCatalog = targetLevel !== 'Any'
+    let candidateCatalog = targetLevel !== 'Any'
       ? PROGRAM_CATALOG.filter(item => item.level === targetLevel)
       : PROGRAM_CATALOG;
+
+    if (schoolLevelOnly) {
+      candidateCatalog = candidateCatalog.filter(item => item.level !== 'PG');
+    } else if (hasBachelorQualification(qualificationText)) {
+      candidateCatalog = candidateCatalog.filter(item => item.level === 'PG');
+    }
 
     const selected = [...candidateCatalog]
       .map(item => ({
         item,
         matchScore: this.scoreCatalogItem(item, {qualification, gpa, interests, preferredCountry}),
       }))
+      .filter(item => item.matchScore >= 60)
       .sort((a, b) => b.matchScore - a.matchScore)
       .slice(0, 5);
 
@@ -121,40 +164,69 @@ class ProgramService {
   private scoreCatalogItem(item: ProgramCatalogItem, data: ProgramSearchFilters): number {
     const qualificationText = normalize(data.qualification || '');
     const interestsText = normalize(data.interests || '');
-    const countryText = normalize(data.preferredCountry || '');
+    const rawCountryText = normalize(data.preferredCountry || '');
+    const countryText = includesAny(rawCountryText, ['any', 'no preference']) ? '' : rawCountryText;
     const qualificationLevel = inferQualificationLevel(data.qualification || '');
     const score = parseNumericScore(data.gpa || '');
 
-    let total = 45;
-
-    if (item.countries.some(country => normalize(country).includes(countryText) || countryText.includes(normalize(country)))) {
-      total += 20;
+    const schoolLevelOnly = hasSchoolQualification(qualificationText) && !hasBachelorQualification(qualificationText);
+    if (schoolLevelOnly && item.level === 'PG') {
+      return -999;
     }
 
-    if (qualificationLevel === 'UG' && item.level === 'PG') {
-      total -= 45;
-    } else if (qualificationLevel === item.level || qualificationLevel === 'Any') {
+    if (hasBachelorQualification(qualificationText) && item.level !== 'PG') {
+      return -999;
+    }
+
+    if (qualificationLevel === 'PG' && (item.level === 'UG' || item.level === 'Diploma')) {
+      return -999;
+    }
+
+    let total = 15;
+
+    if (countryText) {
+      if (countryMatches(item.country, countryText)) {
+        total += 20;
+      } else if (item.countries.some(country => countryMatches(country, countryText))) {
+        total += 5;
+      } else {
+        total -= 8;
+      }
+    }
+
+    const nextLevel = inferNextLevelFromQualification(data.qualification || '');
+    if (nextLevel === item.level) {
       total += 20;
+    } else if (qualificationLevel === item.level || qualificationLevel === 'Any') {
+      total += 10;
     } else if (qualificationLevel === 'UG' && item.level === 'Diploma') {
-      total += 10;
+      total -= 15;
     } else if (qualificationLevel === 'PG' && item.level !== 'UG') {
-      total += 10;
+      total += 5;
     }
 
     if (item.fields.some(field => includesAny(interestsText, [field]))) {
-      total += 20;
+      total += 30;
     } else {
       const inferredField = inferField(interestsText);
-      if (inferredField && item.fields.some(field => includesAny(normalize(field), [inferredField]))) {
-        total += 15;
+      const catalogText = normalize(`${item.name} ${item.eligibility} ${item.fields.join(' ')}`);
+      if (
+        inferredField === 'math_science' &&
+        includesAny(catalogText, ['math', 'mathematics', 'science', 'engineering', 'data science', 'computer science', 'software', 'technology', 'statistics', 'it'])
+      ) {
+        total += 22;
+      } else if (inferredField && item.fields.some(field => includesAny(normalize(field), [inferredField]))) {
+        total += 18;
+      } else if (interestsText) {
+        total -= 20;
       }
     }
 
     if (score !== undefined && item.minGpa !== undefined) {
       if (score >= item.minGpa * 10) {
-        total += 10;
+        total += 15;
       } else {
-        total -= 10;
+        total -= 15;
       }
     }
 
@@ -163,14 +235,14 @@ class ProgramService {
     }
 
     if (qualificationText && item.minQualificationKeywords.some(keyword => qualificationText.includes(keyword))) {
-      total += 10;
+      total += 5;
     }
 
     if (score !== undefined && score < SCHOOL_PASS_PERCENTAGE) {
-      return 35;
+      return 0;
     }
 
-    return Math.max(35, Math.min(98, total));
+    return Math.max(0, Math.min(98, total));
   }
 }
 

@@ -5,8 +5,7 @@ export interface KnowledgeHit {
     score: number;
 }
 declare class VectorKnowledgeService {
-    private documents;
-    search(query: unknown, limit?: number): KnowledgeHit[];
+    search(query: unknown, limit?: number): Promise<KnowledgeHit[]>;
 }
 declare const _default: VectorKnowledgeService;
 export default _default;

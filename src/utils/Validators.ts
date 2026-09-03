@@ -32,6 +32,91 @@ const Validators = {
     return value.trim().length <= max;
   },
 
+  hasRecognizableQualification: (qualification: string): boolean => {
+    const text = qualification.toLowerCase().replace(/\s+/g, ' ').trim();
+    return [
+      '10th',
+      '12th',
+      'class 10',
+      'class 12',
+      'high school',
+      'secondary',
+      'intermediate',
+      'diploma',
+      'bachelor',
+      "bachelor's",
+      'btech',
+      'b.tech',
+      'bsc',
+      'b.sc',
+      'be',
+      'b.e',
+      'bba',
+      'graduate',
+      'graduation',
+      'master',
+      'msc',
+      'm.tech',
+      'mtech',
+      'mba',
+      'postgraduate',
+    ].some(keyword => text.includes(keyword));
+  },
+
+  hasRecognizableInterest: (interests: string): boolean => {
+    const text = interests.toLowerCase().replace(/\s+/g, ' ').trim();
+    return [
+      'computer',
+      'software',
+      'coding',
+      'programming',
+      'it',
+      'technology',
+      'data',
+      'ai',
+      'artificial intelligence',
+      'machine learning',
+      'business',
+      'management',
+      'finance',
+      'marketing',
+      'engineering',
+      'math',
+      'science',
+      'biology',
+      'medical',
+      'health',
+      'nursing',
+      'pharmacy',
+      'education',
+      'teaching',
+      'law',
+      'design',
+      'arts',
+      'cyber',
+      'security',
+    ].some(keyword => text.includes(keyword));
+  },
+
+  hasRecognizableCountry: (country: string): boolean => {
+    const text = country.toLowerCase().replace(/\s+/g, ' ').trim();
+    return [
+      'any',
+      'no preference',
+      'uk',
+      'united kingdom',
+      'england',
+      'usa',
+      'us',
+      'united states',
+      'america',
+      'canada',
+      'australia',
+      'new zealand',
+      'germany',
+    ].some(keyword => text === keyword || text.includes(keyword));
+  },
+
   validateProgramForm: (
     qualification: string,
     gpa: string,
@@ -42,15 +127,23 @@ const Validators = {
 
     if (!Validators.isNotEmpty(qualification)) {
       errors.qualification = 'Qualification is required';
+    } else if (!Validators.hasRecognizableQualification(qualification)) {
+      errors.qualification = 'Enter a real qualification, e.g. 12th Science or B.Tech Computer Science';
     }
     if (!Validators.isNotEmpty(gpa)) {
       errors.gpa = 'GPA or percentage is required';
+    } else if (!Validators.isValidGPA(gpa)) {
+      errors.gpa = 'Enter a valid score, e.g. 75%, 8.1 CGPA, or 3.2 GPA';
     }
     if (!Validators.isNotEmpty(interests)) {
       errors.interests = 'Please enter your interests';
+    } else if (!Validators.hasRecognizableInterest(interests)) {
+      errors.interests = 'Enter a study interest like computer science, business, data, engineering, health, or design';
     }
     if (!Validators.isNotEmpty(preferredCountry)) {
       errors.preferredCountry = 'Preferred country is required';
+    } else if (!Validators.hasRecognizableCountry(preferredCountry)) {
+      errors.preferredCountry = 'Choose a supported country like Canada, UK, USA, Australia, Germany, or type Any';
     }
 
     return {valid: Object.keys(errors).length === 0, errors};

@@ -1,8 +1,8 @@
 const Colors = {
   // Primary Palette
-  primary: '#0F1429',
-  primaryLight: '#161B33',
-  primaryDark: '#080B14',
+  primary: '#F8FAFC',
+  primaryLight: '#EEF2FF',
+  primaryDark: '#E2E8F0',
 
   // Accent — Electric Violet
   accent: '#8B5CF6',
@@ -14,53 +14,53 @@ const Colors = {
   secondaryLight: '#FBBF24',
 
   // Backgrounds
-  background: '#080B14',
-  surface: '#0F1429',
-  surfaceElevated: '#161B33',
-  card: '#12182E',
+  background: '#F7F9FF',
+  surface: '#FFFFFF',
+  surfaceElevated: '#F9FAFF',
+  card: '#FFFFFF',
 
   // Text
-  textPrimary: '#F1F5F9',
-  textSecondary: '#94A3B8',
-  textMuted: '#475569',
-  textInverse: '#080B14',
+  textPrimary: '#0F172A',
+  textSecondary: '#475569',
+  textMuted: '#64748B',
+  textInverse: '#FFFFFF',
 
   // Chat Bubbles
   bubbleUser: '#8B5CF6',
-  bubbleAI: '#1A1F3A',
+  bubbleAI: '#EEF2FF',
   bubbleUserText: '#FFFFFF',
-  bubbleAIText: '#CBD5E1',
+  bubbleAIText: '#0F172A',
 
   // Status
-  success: '#34D399',
-  warning: '#FBBF24',
-  error: '#FB7185',
-  info: '#60A5FA',
+  success: '#16A34A',
+  warning: '#D97706',
+  error: '#DC2626',
+  info: '#2563EB',
 
   // Borders
-  border: '#1E293B',
-  borderLight: '#334155',
+  border: '#E2E8F0',
+  borderLight: '#CBD5E1',
 
   // Input
-  inputBackground: '#0F172A',
-  inputBorder: '#1E293B',
+  inputBackground: '#F8FAFC',
+  inputBorder: '#CBD5E1',
   inputFocusBorder: '#8B5CF6',
-  inputPlaceholder: '#475569',
+  inputPlaceholder: '#94A3B8',
 
   // Overlay
-  overlay: 'rgba(0, 0, 0, 0.75)',
-  overlayLight: 'rgba(0, 0, 0, 0.4)',
+  overlay: 'rgba(255, 255, 255, 0.78)',
+  overlayLight: 'rgba(255, 255, 255, 0.45)',
 
-  // Gradient stops (for LinearGradient or simulated)
-  gradientStart: '#8B5CF6',
-  gradientEnd: '#3B82F6',
-  gradientAccentStart: '#8B5CF6',
-  gradientAccentEnd: '#EC4899',
+  // Gradient stops (for a soft white theme)
+  gradientStart: '#F9FAFF',
+  gradientEnd: '#EEF2FF',
+  gradientAccentStart: '#EDE9FE',
+  gradientAccentEnd: '#DBEAFE',
 
   // Card specific — Unique glow per card
   cardAIAssistant: '#8B5CF6',
   cardProgramFinder: '#3B82F6',
-  cardEligibility: '#34D399',
+  cardEligibility: '#22C55E',
   cardProfile: '#F59E0B',
 
   // Transparent
@@ -68,17 +68,17 @@ const Colors = {
 
   // White shades
   white: '#FFFFFF',
-  white10: 'rgba(255, 255, 255, 0.08)',
-  white20: 'rgba(255, 255, 255, 0.15)',
+  white10: 'rgba(255, 255, 255, 0.55)',
+  white20: 'rgba(255, 255, 255, 0.75)',
 
   // Black shades
   black: '#000000',
-  black50: 'rgba(0, 0, 0, 0.5)',
+  black50: 'rgba(15, 23, 42, 0.5)',
 
   // Glass effect helpers
-  glass: 'rgba(15, 20, 41, 0.75)',
-  glassBorder: 'rgba(139, 92, 246, 0.15)',
-  glassHighlight: 'rgba(255, 255, 255, 0.05)',
+  glass: 'rgba(255, 255, 255, 0.72)',
+  glassBorder: 'rgba(148, 163, 184, 0.18)',
+  glassHighlight: 'rgba(255, 255, 255, 0.9)',
 };
 
 export default Colors;

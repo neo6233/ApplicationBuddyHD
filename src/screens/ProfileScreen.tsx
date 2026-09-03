@@ -290,7 +290,7 @@ const styles = StyleSheet.create({
   sectionTitle: {
     fontSize: 12,
     fontWeight: '700',
-    color: Colors.white,
+    color: Colors.textPrimary,
     letterSpacing: 1,
     textTransform: 'uppercase',
     marginBottom: 12,

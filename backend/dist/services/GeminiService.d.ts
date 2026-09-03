@@ -55,6 +55,7 @@ declare class GeminiService {
         temperature?: number;
         userImage?: string | null;
         language?: 'hi' | 'en';
+        extraSystemPrompt?: string;
     }): Promise<string>;
     checkEligibility(data: {
         qualification: string;
@@ -62,6 +63,23 @@ declare class GeminiService {
         englishScore: string;
         workExperience: string;
         targetLevel?: 'UG' | 'PG' | 'Diploma' | 'Any';
+    }): Promise<string>;
+    extractEligibilityProfileFromDocument(data: {
+        imageBase64: string;
+        mimeType?: string;
+        fileName?: string;
+        typedQualification?: string;
+        typedPercentage?: string;
+        typedEnglishScore?: string;
+        typedWorkExperience?: string;
+    }): Promise<string>;
+    extractEligibilityProfileFromTextDocument(data: {
+        documentText: string;
+        fileName?: string;
+        typedQualification?: string;
+        typedPercentage?: string;
+        typedEnglishScore?: string;
+        typedWorkExperience?: string;
     }): Promise<string>;
 }
 declare const _default: GeminiService;

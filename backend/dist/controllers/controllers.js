@@ -9,6 +9,9 @@ const ProgramService_1 = __importDefault(require("../services/ProgramService"));
 const programCatalog_1 = require("../data/programCatalog");
 const appRules_1 = require("../data/appRules");
 const VectorKnowledgeService_1 = __importDefault(require("../services/VectorKnowledgeService"));
+const pdf_parse_1 = require("pdf-parse");
+const mammoth_1 = __importDefault(require("mammoth"));
+const sharp_1 = __importDefault(require("sharp"));
 const toSafeText = (value) => {
     if (typeof value === 'string') {
         return value;
@@ -27,6 +30,63 @@ const toSafeText = (value) => {
 };
 const normalize = (text) => toSafeText(text).toLowerCase().replace(/[\u2018\u2019]/g, "'").replace(/\s+/g, ' ').trim();
 const includesAny = (text, keywords) => keywords.some(keyword => text.includes(keyword));
+const isPdfDocument = (mimeType, fileName) => (typeof mimeType === 'string' && mimeType.toLowerCase().includes('pdf')) ||
+    (typeof fileName === 'string' && fileName.toLowerCase().endsWith('.pdf'));
+const isWordDocument = (mimeType, fileName) => {
+    const normalizedMimeType = typeof mimeType === 'string' ? mimeType.toLowerCase() : '';
+    const normalizedFileName = typeof fileName === 'string' ? fileName.toLowerCase() : '';
+    return (normalizedMimeType.includes('word') ||
+        normalizedMimeType.includes('officedocument.wordprocessingml') ||
+        normalizedFileName.endsWith('.doc') ||
+        normalizedFileName.endsWith('.docx'));
+};
+const isImageDocument = (mimeType, fileName) => {
+    const normalizedMimeType = typeof mimeType === 'string' ? mimeType.toLowerCase() : '';
+    const normalizedFileName = typeof fileName === 'string' ? fileName.toLowerCase() : '';
+    return (normalizedMimeType.startsWith('image/') ||
+        /\.(?:jpe?g|png|webp|heic|heif)$/i.test(normalizedFileName));
+};
+const extractPdfTextFromBase64 = async (base64) => {
+    const parser = new pdf_parse_1.PDFParse({ data: Buffer.from(base64, 'base64') });
+    try {
+        const result = await parser.getText();
+        return toSafeText(result.text).replace(/\s+/g, ' ').trim();
+    }
+    finally {
+        await parser.destroy();
+    }
+};
+const extractWordTextFromBase64 = async (base64) => {
+    const result = await mammoth_1.default.extractRawText({ buffer: Buffer.from(base64, 'base64') });
+    return toSafeText(result.value).replace(/\s+/g, ' ').trim();
+};
+const extractEligibilityProfileLocallyFromText = (documentText) => {
+    const text = toSafeText(documentText).replace(/\s+/g, ' ').trim();
+    const educationSection = text.match(/\bEDUCATION\b(.{0,450}?)(?:\bSKILLS\b|\bEXPERIENCE\b|\bPROJECTS\b|\bCERTIFICATIONS\b|$)/i)?.[1] || text;
+    const educationMatch = educationSection.match(/\b((?:Bachelor|Master|B\.Tech|BTech|B\.Sc|BSc|B\.E|BE|MBA|MCA|Diploma|Higher Secondary|12th)(?:\s+(?:of|in|Science|Arts|Engineering|Technology|Computer|Information|Business|Data|Management|Commerce|Administration|[A-Z][a-z]+)){0,12})/i);
+    const gpaMatch = text.match(/\b(\d{1,2}(?:\.\d{1,2})?\s*(?:\/\s*10|CGPA|GPA)|\d{2,3}(?:\.\d{1,2})?\s*%)\b/i);
+    const englishMatch = text.match(/\b((?:IELTS|PTE|TOEFL)\s*[:\-]?\s*\d{1,3}(?:\.\d{1,2})?)\b/i);
+    const experienceMatch = text.match(/\b(EXPERIENCE|WORK EXPERIENCE|INTERNSHIP|INTERNSHIPS)\b(.{0,700})/i);
+    return {
+        qualification: educationMatch?.[1]?.trim() || '',
+        percentage: gpaMatch?.[1]?.trim() || '',
+        englishScore: englishMatch?.[1]?.trim() || '',
+        workExperience: experienceMatch?.[2]
+            ? experienceMatch[2]
+                .replace(/\b(EDUCATION|SKILLS|PROJECTS|CERTIFICATIONS|STRENGTHS)\b.*$/i, '')
+                .trim()
+                .slice(0, 260)
+            : '',
+    };
+};
+const convertImageBase64ToPng = async (base64) => {
+    const pngBuffer = await (0, sharp_1.default)(Buffer.from(base64, 'base64'))
+        .rotate()
+        .resize({ width: 1800, height: 1800, fit: 'inside', withoutEnlargement: true })
+        .png()
+        .toBuffer();
+    return pngBuffer.toString('base64');
+};
 const sanitizeConversationHistory = (history) => {
     if (!Array.isArray(history)) {
         return [];
@@ -80,6 +140,36 @@ const isAlternativeReasonQuestion = (text) => {
         'reason',
     ]);
 };
+const isCareerExplorationContext = (message, history) => {
+    const normalized = normalize(`${history.filter(item => item.role === 'user').map(item => item.content).join(' ')} ${message}`);
+    const broadCareer = includesAny(normalized, [
+        'career option',
+        'career options',
+        'choose career',
+        'career path',
+        'career advice',
+        'what should i do',
+        'what can i do',
+        'help me choose',
+        'career choices',
+        'career direction',
+        'job options',
+        'job roles',
+    ]);
+    const explicitProgramAsk = includesAny(normalized, [
+        'program',
+        'course',
+        'college',
+        'university',
+        'degree',
+        'diploma',
+        'bachelor',
+        'master',
+        'apply',
+        'admission',
+    ]);
+    return broadCareer && !explicitProgramAsk;
+};
 const isCivilServiceQuestion = (text) => {
     const normalized = normalize(text);
     return includesAny(normalized, [
@@ -123,8 +213,22 @@ const hasSchoolQualification = (text) => /\b(?:after\s+(?:my\s+)?|class\s*)12\b|
     includesAny(normalize(text), ['12th', '12 pass', 'class 12', 'high school', 'secondary', 'intermediate', '10th']);
 const isAfter12CatalogFilterRequest = (text) => {
     const normalized = normalize(text);
-    return hasSchoolQualification(normalized) && includesAny(normalized, [
+    const asksForCatalogOptions = /\b(?:which|what)\b[\s\S]*\b(?:course|courses|program|programs|option|options)\b/i.test(normalized) ||
+        /\b(?:course|courses|program|programs|option|options)\b[\s\S]*\b(?:available|eligible|possible|can i do|can do|pursue|list|show)\b/i.test(normalized) ||
+        includesAny(normalized, [
+            'course options',
+            'program options',
+            'list courses',
+            'show courses',
+            'show programs',
+            'which i can',
+            'kya kya',
+            'कौनसे',
+            'कौन से',
+        ]);
+    return hasSchoolQualification(normalized) && asksForCatalogOptions && includesAny(normalized, [
         'only',
+        'can i do',
         'can do',
         'directly',
         'eligible',
@@ -132,8 +236,14 @@ const isAfter12CatalogFilterRequest = (text) => {
         'available',
         'possible',
         'which i can',
-        'after completing',
-        'after my',
+        'course options',
+        'program options',
+        'list courses',
+        'show courses',
+        'show programs',
+        'kya kya',
+        'कौनसे',
+        'कौन से',
     ]);
 };
 const getProgramsForRequestedLevel = (level) => {
@@ -166,7 +276,7 @@ const inferLevel = (text) => {
     const t = normalize(text);
     if (includesAny(t, ['phd', 'doctorate', 'dr.']))
         return 'PG';
-    if (includesAny(t, ['master', 'msc', 'ma', 'mtech', 'mba', 'pg', 'post graduate', 'postgraduate']))
+    if (includesAny(t, ['master', 'msc', 'mtech', 'mba', 'post graduate', 'postgraduate']) || /\b(?:ma|pg)\b/i.test(t))
         return 'PG';
     if (includesAny(t, ['diploma', 'certificate', 'polytechnic']))
         return 'Diploma';
@@ -222,6 +332,9 @@ const extractProfileLocally = (message, history) => {
         level = 'Diploma';
     }
     const extractField = (text) => {
+        if (includesAny(text, ['physics chemistry mathematics', 'physics chemistry and mathematics', 'pcm', 'physics', 'chemistry', 'mathematics', 'maths', 'math'])) {
+            return 'math science pcm';
+        }
         if (includesAny(text, ['biology', 'biological', 'pcb', 'medical', 'medicine', 'doctor', 'nursing', 'pharmacy', 'healthcare', 'health', 'बायोलॉजी', 'मेडिकल'])) {
             return 'biology and healthcare';
         }
@@ -520,9 +633,6 @@ const isFinalChoiceRequest = (text) => {
         'ek best course',
     ]);
 };
-// const PROGRAM_NAME_LIST = [...PROGRAM_CATALOG]
-//   .map(program => program.name)
-//   .sort((a, b) => b.length - a.length);
 const findProgramMentions = (text) => {
     const transliterated = transliterateText(text);
     const normalized = normalize(transliterated);
@@ -764,8 +874,22 @@ const hasExplicitlyNoMathBackground = (text) => {
     ]);
 };
 const programMatchesField = (program, field) => {
-    const programText = normalize(`${program.name} ${program.fields.join(' ')}`);
+    const programText = normalize(`${program.name} ${program.eligibility} ${program.fields.join(' ')}`);
     const normalizedField = normalize(field);
+    if (includesAny(normalizedField, ['math science', 'pcm', 'physics', 'chemistry', 'mathematics', 'maths', 'math'])) {
+        return includesAny(programText, [
+            'math',
+            'mathematics',
+            'science',
+            'computer',
+            'data science',
+            'engineering',
+            'technology',
+            'software',
+            'statistics',
+            'it',
+        ]);
+    }
     if (includesAny(normalizedField, ['biology', 'health', 'medical', 'pharmacy', 'nursing'])) {
         return includesAny(programText, ['biology', 'health', 'medical', 'pharmacy', 'nursing']);
     }
@@ -789,10 +913,54 @@ const selectCompatiblePrograms = (programs, field, userContext) => programs.filt
         return false;
     return true;
 });
-const buildRecommendationPrompt = (message, profile, programs, language) => {
+const buildRetrievedKnowledgeContext = (hits) => {
+    if (!hits.length)
+        return '';
+    const topHits = hits.slice(0, 3);
+    const kbLines = topHits.map((hit, index) => `${index + 1}. ${hit.text}`);
+    return `Relevant app knowledge from the vector store:
+${kbLines.join('\n')}
+
+Use these facts to answer the user's question accurately. Do not make up details outside the knowledge provided here.`;
+};
+const buildCourseFollowUpQuestion = (profile, language) => {
+    const level = normalize(profile.level);
+    if (!profile.level || profile.level === 'Any') {
+        return language === 'hi'
+            ? 'Aap kis level ka course dekh rahe hain: 12th ke baad UG, diploma, ya graduation ke baad PG?'
+            : 'Which level are you looking for: UG after 12th, diploma, or PG after graduation?';
+    }
+    if (!profile.field) {
+        if (level === 'ug' || level === 'diploma') {
+            return language === 'hi'
+                ? '12th ke baad main UG/Diploma options dekhunga. Aapki interest kis side mein hai: computer/IT, business, engineering, healthcare, design, ya kuch aur?'
+                : 'After 12th, I will look at UG/Diploma options. What interests you most: computer/IT, business, engineering, healthcare, design, or something else?';
+        }
+        return language === 'hi'
+            ? 'Aap kis subject ya career direction mein interest rakhte hain?'
+            : 'What subject or career direction are you most interested in?';
+    }
+    if (!profile.score) {
+        return language === 'hi'
+            ? 'Aapka latest percentage ya GPA kya hai?'
+            : 'What is your latest percentage or GPA?';
+    }
+    if (!profile.country) {
+        return language === 'hi'
+            ? 'Aap kis country mein study prefer karte hain?'
+            : 'Which country would you prefer to study in?';
+    }
+    return language === 'hi'
+        ? 'Aapka main goal kya hai: job, higher studies, ya migration?'
+        : 'What is your main goal: jobs, higher studies, or migration?';
+};
+const buildRecommendationPrompt = (message, profile, programs, language, knowledgeHits) => {
     const catalogContext = programs.length
         ? programs.slice(0, 5).map(program => `- ${program.name}: ${program.eligibility}; careers: ${program.careerOpportunities.join(', ')}`).join('\n')
         : 'No catalog program is a strong subject and eligibility match.';
+    const retrievedKnowledge = buildRetrievedKnowledgeContext(knowledgeHits);
+    // FIX: removed stray `};` that was terminating the template literal prematurely,
+    // and removed the duplicate instructions (items 5 and 6 appeared twice).
     return `Answer the student's latest question as an intelligent admission counsellor.
 
 Latest question: ${message}
@@ -800,14 +968,18 @@ Student profile: ${JSON.stringify(profile)}
 Compatible programs in this app's catalog:
 ${catalogContext}
 
-Instructions:
+${retrievedKnowledge ? `${retrievedKnowledge}
+
+` : ''}Instructions:
 1. Treat the latest user correction as authoritative. Never assume math when they say PCB, biology, or no math.
 2. Answer the exact question first and briefly explain your reasoning.
 3. Recommend only the compatible catalog programs listed above as programs available in this app.
 4. Previous assistant recommendations may be wrong. Do not copy or defend program names from earlier assistant replies.
-5. If there is no suitable catalog match, do not mention any previous catalog program as relevant. Say there is no direct match, then give useful general education paths from your knowledge, clearly labeling them as general options outside the current catalog.
-6. Do not repeat a previous generic course list. Ask at most one useful follow-up question.
-7. Reply in ${language === 'hi' ? 'natural Hindi/Hinglish because the latest user message is Hindi/Hinglish' : 'English only because the latest user message is English. Do not use Hindi words'} using short paragraphs or a compact list.`;
+5. If the user is exploring career routes rather than asking for a specific program recommendation, offer 1-2 short high-level pathways and then ask one clarifying follow-up question to narrow further.
+6. Avoid long, exhaustive lists. Keep the answer short and narrow; do not dump all career options at once.
+7. If there is no suitable catalog match, do not mention any previous catalog program as relevant. Say there is no direct match, then give useful general education paths from your knowledge, clearly labeling them as general options outside the current catalog.
+8. Do not repeat a previous generic course list. Ask at most one useful follow-up question.
+9. Reply in ${language === 'hi' ? 'natural Hindi/Hinglish because the latest user message is Hindi/Hinglish' : 'English only because the latest user message is English. Do not use Hindi words'} using short paragraphs or a compact list.`;
 };
 const buildNoCatalogMatchReply = (field, language) => {
     const isBiologyProfile = includesAny(normalize(field), ['biology', 'health', 'medical', 'pharmacy', 'nursing']);
@@ -1164,7 +1336,7 @@ const chatController = async (req, res) => {
         const cleanMessage = message.trim();
         const responseLanguage = detectResponseLanguage(cleanMessage, safeHistory);
         const retrievalContext = `${safeHistory.slice(-6).map(item => item.content).join(' ')} ${cleanMessage}`;
-        const knowledgeHits = VectorKnowledgeService_1.default.search(retrievalContext);
+        const knowledgeHits = await VectorKnowledgeService_1.default.search(retrievalContext);
         // ── Save program intent check ──────────────────────────────────────────
         if (isSaveIntent(cleanMessage)) {
             const programToSave = findProgramMentions(cleanMessage)[0] || findProgramMentions(safeHistory.map(m => m.content).join(' '))[0];
@@ -1365,7 +1537,7 @@ const chatController = async (req, res) => {
             analysis.needsMoreInfo = !(hasLevel && hasField);
         }
         console.log('[ANALYSIS AFTER PROCESSING]', JSON.stringify(analysis, null, 2));
-        // ── Course recommendation flow ─────────────────────────────────────────
+        // Course recommendation flow
         if (analysis?.topic === 'course' && analysis?.profile) {
             const fullUserContext = `${safeHistory
                 .filter(item => item.role === 'user')
@@ -1385,24 +1557,32 @@ const chatController = async (req, res) => {
             }
             // Still missing info — ask one follow-up question
             if (analysis.needsMoreInfo) {
-                const missingFieldsText = [];
-                if (!analysis.profile.level)
-                    missingFieldsText.push('education level (12th, B.Tech, etc.)');
-                if (!analysis.profile.field)
-                    missingFieldsText.push('field of interest (CS, engineering, etc.)');
-                if (!analysis.profile.score)
-                    missingFieldsText.push('academic score/GPA');
-                if (!analysis.profile.country)
-                    missingFieldsText.push('preferred country');
-                const missingInfo = missingFieldsText.length > 0
-                    ? `Ask ONE specific question to collect this: ${missingFieldsText.join(', ')}. Do NOT ask the same question twice.`
-                    : 'Ask ONE clarifying question to better understand their profile.';
-                const followUp = await GeminiService_1.default.chat(missingInfo, safeHistory, { temperature: 0.3, language: responseLanguage });
-                await sendResponse(res, cleanMessage, safeHistory, responseLanguage, { reply: followUp, responseLanguage });
+                const followUp = buildCourseFollowUpQuestion(analysis.profile, responseLanguage);
+                await sendResponse(res, cleanMessage, safeHistory, responseLanguage, {
+                    reply: followUp,
+                    responseLanguage,
+                    responseType: 'general',
+                    rules: relevantRules.map(rule => rule.id),
+                    knowledge: knowledgeHits.map(hit => hit.id),
+                });
                 return;
             }
             // Have enough info — search catalog and explain matches
             const questionIntent = inferQuestionIntent(cleanMessage);
+            const isCareerExploration = isCareerExplorationContext(cleanMessage, safeHistory);
+            if (isCareerExploration) {
+                const followUp = responseLanguage === 'hi'
+                    ? `Maths एक अच्छी शुरुआत है। क्या आप programming, data analytics, या finance/business में अधिक रुचि लेते हैं? इससे मैं आपको अगला छोटा कदम स्वयं narrow करके दे सकता हूँ।`
+                    : `Math is a strong foundation. Which direction interests you more: programming, data analytics, or finance/business? That will help me narrow down the next step in a short answer.`;
+                await sendResponse(res, cleanMessage, safeHistory, responseLanguage, {
+                    reply: followUp,
+                    responseLanguage,
+                    responseType: 'general',
+                    rules: relevantRules.map(rule => rule.id),
+                    knowledge: knowledgeHits.map(hit => hit.id),
+                });
+                return;
+            }
             const allPrograms = filterProgramsForStudentProfile(ProgramService_1.default.search({
                 qualification: `${analysis.profile.qualification || ''} ${fullUserContext}`,
                 gpa: analysis.profile.score || '',
@@ -1417,7 +1597,7 @@ const chatController = async (req, res) => {
                 : compatiblePrograms;
             const isFinalRecommendation = finalChoiceRequested && programs.length > 0;
             const responsePrograms = isFinalRecommendation ? programs.slice(0, 1) : programs;
-            let reply = await GeminiService_1.default.chat(buildRecommendationPrompt(cleanMessage, analysis.profile, responsePrograms, responseLanguage), safeHistory.filter(item => item.role === 'user'), {
+            let reply = await GeminiService_1.default.chat(buildRecommendationPrompt(cleanMessage, analysis.profile, responsePrograms, responseLanguage, knowledgeHits), safeHistory.filter(item => item.role === 'user'), {
                 systemPrompt: `You are ARIA, a thoughtful AI admission counsellor. Reason from the full conversation and the student's latest correction. Catalog facts are authoritative for programs available in the app, while general educational guidance is allowed when clearly identified as outside the catalog.`,
                 temperature: 0.35,
                 maxOutputTokens: 420,
@@ -1438,6 +1618,7 @@ const chatController = async (req, res) => {
         }
         // ── General chat flow ──────────────────────────────────────────────────
         const reply = await GeminiService_1.default.chat(cleanMessage, safeHistory, {
+            extraSystemPrompt: buildRetrievedKnowledgeContext(knowledgeHits),
             temperature: 0.3,
             userImage,
             language: responseLanguage,
@@ -1455,11 +1636,114 @@ const chatController = async (req, res) => {
     }
 };
 exports.chatController = chatController;
+const hasRecognizableProgramQualification = (qualification) => {
+    const text = normalize(qualification);
+    return includesAny(text, [
+        '10th',
+        '12th',
+        'class 10',
+        'class 12',
+        'high school',
+        'secondary',
+        'intermediate',
+        'diploma',
+        'bachelor',
+        "bachelor's",
+        'btech',
+        'b.tech',
+        'bsc',
+        'b.sc',
+        'be',
+        'b.e',
+        'bba',
+        'graduate',
+        'graduation',
+        'master',
+        'msc',
+        'm.tech',
+        'mtech',
+        'mba',
+        'postgraduate',
+    ]);
+};
+const hasRecognizableProgramInterest = (interests) => {
+    const text = normalize(interests);
+    return includesAny(text, [
+        'computer',
+        'software',
+        'coding',
+        'programming',
+        'it',
+        'technology',
+        'data',
+        'ai',
+        'artificial intelligence',
+        'machine learning',
+        'business',
+        'management',
+        'finance',
+        'marketing',
+        'engineering',
+        'math',
+        'science',
+        'biology',
+        'medical',
+        'health',
+        'nursing',
+        'pharmacy',
+        'education',
+        'teaching',
+        'law',
+        'design',
+        'arts',
+        'cyber',
+        'security',
+    ]);
+};
+const hasRecognizableProgramCountry = (country) => {
+    const text = normalize(country);
+    return [
+        'any',
+        'no preference',
+        'uk',
+        'united kingdom',
+        'england',
+        'usa',
+        'us',
+        'united states',
+        'america',
+        'canada',
+        'australia',
+        'new zealand',
+        'germany',
+    ].some(keyword => text === keyword || text.includes(keyword));
+};
+const hasValidProgramScore = (gpa) => {
+    const text = normalize(gpa);
+    const numericValue = Number(text.replace(/[^0-9.]/g, ''));
+    return Number.isFinite(numericValue) && numericValue >= 0 && numericValue <= 100;
+};
 const programFinderController = async (req, res) => {
     try {
         const { qualification, gpa, interests, preferredCountry } = req.body;
-        if (!qualification || !interests) {
-            res.status(400).json({ message: 'qualification and interests are required' });
+        if (!qualification || !gpa || !interests || !preferredCountry) {
+            res.status(400).json({ message: 'qualification, score, interests, and preferred country are required' });
+            return;
+        }
+        if (!hasRecognizableProgramQualification(qualification)) {
+            res.status(400).json({ message: 'Please enter a real qualification, e.g. 12th Science or B.Tech Computer Science.' });
+            return;
+        }
+        if (!hasValidProgramScore(gpa)) {
+            res.status(400).json({ message: 'Please enter a valid score, e.g. 75%, 8.1 CGPA, or 3.2 GPA.' });
+            return;
+        }
+        if (!hasRecognizableProgramInterest(interests)) {
+            res.status(400).json({ message: 'Please enter a real study interest like computer science, business, data, engineering, health, or design.' });
+            return;
+        }
+        if (!hasRecognizableProgramCountry(preferredCountry)) {
+            res.status(400).json({ message: 'Please choose a supported country like Canada, UK, USA, Australia, Germany, or type Any.' });
             return;
         }
         const userProfileAnalysis = await GeminiService_1.default.analyzeConversation(`Highest qualification: ${qualification}. GPA: ${gpa || 'not provided'}. Interests: ${interests}. Preferred country: ${preferredCountry || 'not provided'}`, []);
@@ -1470,9 +1754,12 @@ const programFinderController = async (req, res) => {
             preferredCountry: preferredCountry || '',
         });
         const scoreValue = parseScoreValue(gpa || '');
+        const hasBachelorProfile = hasBachelorQualification(String(qualification || ''));
         const summary = isFailingAcademicScore(scoreValue)
             ? `Your ${scoreValue}% score is below the usual ${SCHOOL_PASS_PERCENTAGE}% pass mark. These programs are only options to explore after you clear 12th or improve your result.`
-            : await GeminiService_1.default.chat(`You are ARIA. In one short sentence, explain why these programs fit the student's profile.
+            : hasBachelorProfile
+                ? `Because your highest qualification is a Bachelor's degree, I ranked postgraduate programs and prioritized ${preferredCountry || 'your preferred location'} plus ${interests}.`
+                : await GeminiService_1.default.chat(`You are ARIA. In one short sentence, explain why these programs fit the student's profile.
 Profile: ${JSON.stringify(userProfileAnalysis?.profile || {})}
 Programs: ${JSON.stringify(programs.map(p => ({ name: p.name, level: p.level, field: p.fields, country: p.country })))}`, [], { temperature: 0.2, maxOutputTokens: 80 });
         res.json({
@@ -1491,20 +1778,141 @@ Programs: ${JSON.stringify(programs.map(p => ({ name: p.name, level: p.level, fi
 exports.programFinderController = programFinderController;
 const eligibilityController = async (req, res) => {
     try {
-        const { qualification, percentage, englishScore, workExperience } = req.body;
-        if (!qualification || !percentage) {
-            res.status(400).json({ message: 'qualification and percentage are required' });
+        const { qualification, percentage, englishScore, workExperience, document } = req.body;
+        const uploadedDocument = document && typeof document === 'object'
+            ? document
+            : null;
+        let extractedProfile = {};
+        if (uploadedDocument?.base64 && typeof uploadedDocument.base64 === 'string') {
+            let documentText = '';
+            let sourceType = 'document';
+            try {
+                const mimeType = typeof uploadedDocument.mimeType === 'string' ? uploadedDocument.mimeType : undefined;
+                const fileName = typeof uploadedDocument.fileName === 'string' ? uploadedDocument.fileName : undefined;
+                sourceType = isPdfDocument(mimeType, fileName)
+                    ? 'PDF'
+                    : isWordDocument(mimeType, fileName)
+                        ? 'Word document'
+                        : isImageDocument(mimeType, fileName)
+                            ? 'image'
+                            : 'document';
+                documentText = isPdfDocument(mimeType, fileName)
+                    ? await extractPdfTextFromBase64(uploadedDocument.base64)
+                    : isWordDocument(mimeType, fileName)
+                        ? await extractWordTextFromBase64(uploadedDocument.base64)
+                        : '';
+                const localDocumentProfile = documentText
+                    ? extractEligibilityProfileLocallyFromText(documentText)
+                    : { qualification: '', percentage: '', englishScore: '', workExperience: '' };
+                const rawDocumentProfile = documentText
+                    ? await GeminiService_1.default.extractEligibilityProfileFromTextDocument({
+                        documentText,
+                        fileName,
+                        typedQualification: qualification || '',
+                        typedPercentage: percentage || '',
+                        typedEnglishScore: englishScore || '',
+                        typedWorkExperience: workExperience || '',
+                    })
+                    : isImageDocument(mimeType, fileName)
+                        ? await GeminiService_1.default.extractEligibilityProfileFromDocument({
+                            imageBase64: await convertImageBase64ToPng(uploadedDocument.base64),
+                            mimeType: 'image/png',
+                            fileName,
+                            typedQualification: qualification || '',
+                            typedPercentage: percentage || '',
+                            typedEnglishScore: englishScore || '',
+                            typedWorkExperience: workExperience || '',
+                        })
+                        : await GeminiService_1.default.extractEligibilityProfileFromDocument({
+                            imageBase64: uploadedDocument.base64,
+                            mimeType,
+                            fileName,
+                            typedQualification: qualification || '',
+                            typedPercentage: percentage || '',
+                            typedEnglishScore: englishScore || '',
+                            typedWorkExperience: workExperience || '',
+                        });
+                const parsedProfile = parseEligibilityJson(rawDocumentProfile);
+                const extractedQualification = toSafeText(parsedProfile?.qualification).trim() || localDocumentProfile.qualification || '';
+                const extractedPercentage = toSafeText(parsedProfile?.percentage).trim() || localDocumentProfile.percentage || '';
+                const extractedEnglishScore = toSafeText(parsedProfile?.englishScore).trim() || localDocumentProfile.englishScore || '';
+                const extractedWorkExperience = toSafeText(parsedProfile?.workExperience).trim() || localDocumentProfile.workExperience || '';
+                extractedProfile = {
+                    qualification: extractedQualification,
+                    percentage: extractedPercentage,
+                    englishScore: extractedEnglishScore,
+                    workExperience: extractedWorkExperience,
+                    documentSummary: toSafeText(parsedProfile?.documentSummary).trim(),
+                    nextStep: toSafeText(parsedProfile?.nextStep).trim(),
+                    sourceType,
+                    extractionStatus: 'read',
+                    extractionMessage: extractedPercentage
+                        ? `Read ${sourceType}${fileName ? `: ${fileName}` : ''}`
+                        : `Read ${sourceType}${fileName ? `: ${fileName}` : ''}. I found your qualification${extractedWorkExperience ? ' and experience' : ''}, but no percentage/CGPA in the document.`,
+                };
+            }
+            catch (documentError) {
+                console.warn('[EligibilityDocument] Extraction failed:', documentError?.message || documentError);
+                const localDocumentProfile = documentText
+                    ? extractEligibilityProfileLocallyFromText(documentText)
+                    : { qualification: '', percentage: '', englishScore: '', workExperience: '' };
+                extractedProfile = {
+                    qualification: localDocumentProfile.qualification,
+                    percentage: localDocumentProfile.percentage,
+                    englishScore: localDocumentProfile.englishScore,
+                    workExperience: localDocumentProfile.workExperience,
+                    sourceType,
+                    extractionStatus: localDocumentProfile.qualification || localDocumentProfile.percentage ? 'read' : 'failed',
+                    extractionMessage: localDocumentProfile.qualification || localDocumentProfile.percentage
+                        ? `Read ${sourceType}. I used the text I could extract from the document, but please add percentage/CGPA if available.`
+                        : 'I could not read qualification and marks from this file. Try a clearer PDF/DOCX/JPG/PNG or type the details below.',
+                };
+            }
+        }
+        const finalQualification = toSafeText(qualification).trim() || extractedProfile.qualification || '';
+        const finalPercentage = toSafeText(percentage).trim() || extractedProfile.percentage || (uploadedDocument ? 'Not provided' : '');
+        const finalEnglishScore = toSafeText(englishScore).trim() || extractedProfile.englishScore || 'Not provided';
+        const finalWorkExperience = toSafeText(workExperience).trim() || extractedProfile.workExperience || 'None';
+        if (!finalQualification || (!uploadedDocument && !finalPercentage)) {
+            res.status(400).json({
+                message: uploadedDocument
+                    ? 'I could not read your qualification from this file. Please upload a clearer document or type your highest qualification below.'
+                    : 'qualification and percentage are required',
+            });
             return;
         }
-        const rawResult = await GeminiService_1.default.checkEligibility({
-            qualification,
-            percentage,
-            englishScore: englishScore || 'Not provided',
-            workExperience: workExperience || 'None',
-            targetLevel: inferEligibilityTargetLevel(qualification),
+        let result;
+        try {
+            const rawResult = await GeminiService_1.default.checkEligibility({
+                qualification: finalQualification,
+                percentage: finalPercentage,
+                englishScore: finalEnglishScore,
+                workExperience: finalWorkExperience,
+                targetLevel: inferEligibilityTargetLevel(finalQualification),
+            });
+            result = sanitizeEligibilityResult(parseEligibilityJson(rawResult), finalQualification, finalPercentage, finalEnglishScore, finalWorkExperience);
+        }
+        catch (eligibilityError) {
+            console.warn('[EligibilityController] AI eligibility failed, using local result:', eligibilityError?.message || eligibilityError);
+            result = buildLocalEligibilityResult(finalQualification, finalPercentage, finalEnglishScore, finalWorkExperience);
+        }
+        res.json({
+            ...result,
+            extractedProfile: uploadedDocument
+                ? {
+                    qualification: finalQualification,
+                    percentage: finalPercentage,
+                    englishScore: finalEnglishScore === 'Not provided' ? '' : finalEnglishScore,
+                    workExperience: finalWorkExperience === 'None' ? '' : finalWorkExperience,
+                    documentSummary: extractedProfile.documentSummary,
+                    nextStep: extractedProfile.nextStep,
+                    sourceType: extractedProfile.sourceType,
+                    extractionStatus: extractedProfile.extractionStatus,
+                    extractionMessage: extractedProfile.extractionMessage,
+                }
+                : undefined,
+            timestamp: Date.now(),
         });
-        const result = sanitizeEligibilityResult(parseEligibilityJson(rawResult), qualification, percentage, englishScore || 'Not provided', workExperience || 'None');
-        res.json({ ...result, timestamp: Date.now() });
     }
     catch (error) {
         console.error('[EligibilityController] Error:', error?.message || error);

@@ -134,7 +134,7 @@ const hasBelowSecondaryQualification = (text: string): boolean => {
 const inferLevel = (text: string): 'UG' | 'PG' | 'Diploma' | 'Any' => {
   const t = normalize(text);
   if (includesAny(t, ['phd', 'doctorate', 'dr.'])) return 'PG';
-  if (includesAny(t, ['master', 'msc', 'ma', 'mtech', 'mba', 'pg', 'post graduate', 'postgraduate'])) return 'PG';
+  if (includesAny(t, ['master', 'msc', 'mtech', 'mba', 'post graduate', 'postgraduate']) || /\b(?:ma|pg)\b/i.test(t)) return 'PG';
   if (includesAny(t, ['diploma', 'certificate', 'polytechnic'])) return 'Diploma';
   if (includesAny(t, ['bachelor', 'be', 'btech', 'b.sc', 'bba', 'undergraduate', 'ug', 'b.a', 'b.com'])) return 'UG';
   // Only map 12th/Secondary to UG — NOT 10th (10th is below the catalog threshold)
@@ -151,6 +151,9 @@ const extractFieldFromText = (text: string): string => {
   const normalized = normalize(text);
   // IMPORTANT: Check multi-word phrases FIRST before single-word matches
   // "data science" must be checked BEFORE "computer"/"science" individually
+  if (includesAny(normalized, ['physics chemistry mathematics', 'physics chemistry and mathematics', 'pcm', 'physics', 'chemistry', 'mathematics', 'maths', 'math'])) {
+    return 'math science pcm';
+  }
   if (includesAny(normalized, ['data science', 'डेटा साइंस', 'डाटा साइंस'])) {
     return 'data science';
   }
@@ -903,6 +906,47 @@ const isDuplicateReply = (reply: string, history: ConversationMessage[]): boolea
   return last2.some(m => clean(m.content) === cleanReply);
 };
 
+const buildCourseFollowUpQuestion = (
+  profile: NonNullable<AssistantAnalysis['profile']>,
+  language: 'en' | 'hi',
+) => {
+  const level = normalize(profile.level || '');
+
+  if (!profile.level || profile.level === 'Any') {
+    return language === 'hi'
+      ? 'Aap kis level ka course dekh rahe hain: 12th ke baad UG, diploma, ya graduation ke baad PG?'
+      : 'Which level are you looking for: UG after 12th, diploma, or PG after graduation?';
+  }
+
+  if (!profile.field) {
+    if (level === 'ug' || level === 'diploma') {
+      return language === 'hi'
+        ? '12th ke baad main UG/Diploma options dekhunga. Aapki interest kis side mein hai: computer/IT, business, engineering, healthcare, design, ya kuch aur?'
+        : 'After 12th, I will look at UG/Diploma options. What interests you most: computer/IT, business, engineering, healthcare, design, or something else?';
+    }
+
+    return language === 'hi'
+      ? 'Aap kis subject ya career direction mein interest rakhte hain?'
+      : 'What subject or career direction are you most interested in?';
+  }
+
+  if (!profile.score) {
+    return language === 'hi'
+      ? 'Aapka latest percentage ya GPA kya hai?'
+      : 'What is your latest percentage or GPA?';
+  }
+
+  if (!profile.country) {
+    return language === 'hi'
+      ? 'Aap kis country mein study prefer karte hain?'
+      : 'Which country would you prefer to study in?';
+  }
+
+  return language === 'hi'
+    ? 'Aapka main goal kya hai: job, higher studies, ya migration?'
+    : 'What is your main goal: jobs, higher studies, or migration?';
+};
+
 // ─── Main Client-Side processChat entrypoint ─────────────────────────────────
 export const processChat = async (
   message: string,
@@ -1087,21 +1131,13 @@ YOUR TASK:
 
     // Still missing info — ask a specific follow-up question via Gemini
     if (analysis.needsMoreInfo) {
-      const missingFieldsText: string[] = [];
-      if (!analysis.profile.level) { missingFieldsText.push('education level (12th, B.Tech, etc.)'); }
-      if (!analysis.profile.field) { missingFieldsText.push('field of interest (CS, engineering, business, etc.)'); }
-      if (!analysis.profile.score) { missingFieldsText.push('academic score/GPA'); }
-      if (!analysis.profile.country) { missingFieldsText.push('preferred study country'); }
-
-      const missingInfo = missingFieldsText.length > 0
-        ? `Ask ONE specific question to collect this missing info: ${missingFieldsText.join(', ')}. Do NOT ask the same question twice. Do NOT list courses yet.`
-        : 'Ask ONE clarifying question to better understand their profile.';
-
-      const followUp = await directGeminiChat(missingInfo, safeHistory, { temperature: 0.3, language: responseLanguage });
+      const followUp = buildCourseFollowUpQuestion(analysis.profile, responseLanguage);
       return {
         reply: followUp,
         responseLanguage,
         responseType: 'general',
+        rules: relevantRules.map(rule => rule.id),
+        knowledge: knowledgeHits.map(hit => hit.id),
         timestamp: Date.now(),
       };
     }

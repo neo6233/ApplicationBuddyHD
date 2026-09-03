@@ -127,3 +127,21 @@ export async function stopSpeaking(): Promise<void> {
     // ignore
   }
 }
+
+export function subscribeToSpeechStatus(
+  listener: (isSpeaking: boolean) => void,
+) {
+  const handleStart = () => listener(true);
+  const handleStop = () => listener(false);
+
+  const subscriptions = [
+    (Tts.addEventListener('tts-start', handleStart) as any),
+    (Tts.addEventListener('tts-finish', handleStop) as any),
+    (Tts.addEventListener('tts-cancel', handleStop) as any),
+    (Tts.addEventListener('tts-error', handleStop) as any),
+  ];
+
+  return () => {
+    subscriptions.forEach(subscription => subscription?.remove?.());
+  };
+}

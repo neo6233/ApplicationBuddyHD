@@ -86,6 +86,22 @@ const normalize = (text: string) =>
 const includesAny = (text: string, keywords: string[]) =>
   keywords.some(kw => text.includes(kw));
 
+const hasSchoolQualification = (text: string) =>
+  includesAny(text, ['high school', 'secondary', '12th', '12 pass', 'class 12', '10th', '10 pass', 'intermediate']) ||
+  /\b(?:after\s+(?:my\s+)?|class\s*)12\b|\b12\s*(?:pass|standard|std|grade)\b/i.test(text);
+
+const hasBachelorQualification = (text: string) =>
+  includesAny(text, ['bachelor', "bachelor's", 'bachelors', 'btech', 'b.tech', 'b.sc', 'bsc', 'bba', 'b.e', 'graduation', 'graduate']);
+
+const COUNTRY_ALIASES: Record<string, string[]> = {
+  uk: ['uk', 'united kingdom', 'england', 'britain', 'great britain'],
+  usa: ['usa', 'us', 'united states', 'america'],
+  canada: ['canada'],
+  australia: ['australia'],
+  'new zealand': ['new zealand', 'nz'],
+  germany: ['germany'],
+};
+
 const parseNumericScore = (input: string): number | undefined => {
   const n = normalize(input);
   const pct = n.match(/(\d{1,3}(?:\.\d{1,2})?)\s*%/);
@@ -103,11 +119,32 @@ const parseNumericScore = (input: string): number | undefined => {
 const inferLevel = (q: string): 'UG' | 'PG' | 'Diploma' | 'Any' => {
   const t = normalize(q);
   if (includesAny(t, ['phd', 'doctorate'])) return 'PG';
-  if (includesAny(t, ['master', 'msc', 'ma', 'mtech', 'mba', 'pg'])) return 'PG';
+  if (includesAny(t, ['master', 'msc', 'mtech', 'mba', 'postgraduate', 'post graduate']) || /\b(?:ma|pg)\b/i.test(t)) return 'PG';
   if (includesAny(t, ['diploma', 'certificate'])) return 'Diploma';
-  if (includesAny(t, ['bachelor', 'be', 'btech', 'b.sc', 'bba', 'undergraduate'])) return 'UG';
-  if (includesAny(t, ['high school', 'secondary', '12th', '10th'])) return 'UG';
+  if (hasBachelorQualification(t) || includesAny(t, ['undergraduate'])) return 'UG';
+  if (hasSchoolQualification(t)) return 'UG';
   return 'Any';
+};
+
+const inferNextLevel = (qualification: string): 'UG' | 'PG' | 'Diploma' | 'Any' => {
+  const t = normalize(qualification);
+  if (hasBachelorQualification(t) || includesAny(t, ['undergraduate'])) return 'PG';
+  if (includesAny(t, ['master', 'msc', 'mtech', 'mba', 'postgraduate', 'post graduate']) || /\b(?:ma|pg)\b/i.test(t)) return 'PG';
+  if (includesAny(t, ['diploma', 'certificate'])) return 'UG';
+  if (hasSchoolQualification(t)) return 'UG';
+  return 'Any';
+};
+
+const countryMatches = (programCountry: string, preferredCountry: string): boolean => {
+  const preferred = normalize(preferredCountry);
+  const catalogCountry = normalize(programCountry);
+  if (!preferred) return false;
+  if (catalogCountry.includes(preferred) || preferred.includes(catalogCountry)) return true;
+  return Object.values(COUNTRY_ALIASES).some(
+    aliases =>
+      aliases.includes(catalogCountry) &&
+      aliases.some(alias => preferred.includes(alias)),
+  );
 };
 
 const inferField = (text: string): string | undefined => {
@@ -131,22 +168,35 @@ const scoreCatalogItem = (item: ProgramCatalogItem, data: ProgramFinderInput): n
   const it = normalize(data.interests);
   const ct = normalize(data.preferredCountry);
   const level = inferLevel(data.qualification);
+  const nextLevel = inferNextLevel(data.qualification);
   const score = parseNumericScore(data.gpa);
-  let total = 45;
+  const schoolLevelOnly = hasSchoolQualification(qt) && !hasBachelorQualification(qt);
 
-  if (item.countries.some(c => normalize(c).includes(ct) || ct.includes(normalize(c)))) total += 20;
-  if (level === item.level || level === 'Any') total += 20;
-  else if (level === 'UG' && item.level === 'Diploma') total += 10;
-  else if (level === 'PG' && item.level !== 'UG') total += 10;
-  if (item.fields.some(f => includesAny(it, [f]))) total += 20;
+  if (schoolLevelOnly && item.level === 'PG') return -999;
+  if (hasBachelorQualification(qt) && item.level !== 'PG') return -999;
+  if (level === 'PG' && (item.level === 'UG' || item.level === 'Diploma')) return -999;
+
+  let total = 15;
+
+  if (ct) {
+    if (countryMatches(item.country, ct)) total += 20;
+    else if (item.countries.some(c => countryMatches(c, ct))) total += 5;
+    else total -= 8;
+  }
+  if (nextLevel === item.level) total += 20;
+  else if (level === item.level || level === 'Any') total += 10;
+  else if (level === 'UG' && item.level === 'Diploma') total -= 15;
+  else if (level === 'PG' && item.level !== 'UG') total += 5;
+  if (item.fields.some(f => includesAny(it, [f]))) total += 30;
   else {
     const inf = inferField(it);
-    if (inf && item.fields.some(f => includesAny(normalize(f), [inf]))) total += 15;
+    if (inf && item.fields.some(f => includesAny(normalize(f), [inf]))) total += 18;
+    else if (it) total -= 20;
   }
   if (score !== undefined && item.minGpa !== undefined) {
-    total += score >= item.minGpa * 10 ? 10 : -10;
+    total += score >= item.minGpa * 10 ? 15 : -15;
   }
-  if (qt && item.minQualificationKeywords.some(k => qt.includes(k))) total += 10;
+  if (qt && item.minQualificationKeywords.some(k => qt.includes(k))) total += 5;
   return Math.max(35, Math.min(98, total));
 };
 
@@ -176,8 +226,11 @@ const buildLocalFallbackReply = (userMessage: string): string | null => {
 };
 
 export const buildLocalProgramResponse = (data: ProgramFinderInput): ProgramFinderResponse => {
+  const nextLevel = inferNextLevel(data.qualification);
   const selected = [...PROGRAM_CATALOG]
+    .filter(item => nextLevel === 'Any' || item.level === nextLevel)
     .map(item => ({item, matchScore: scoreCatalogItem(item, data)}))
+    .filter(item => item.matchScore === 35 || item.matchScore >= 60)
     .sort((a, b) => b.matchScore - a.matchScore)
     .slice(0, 5);
 

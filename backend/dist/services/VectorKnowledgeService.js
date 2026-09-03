@@ -2,6 +2,12 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 const appRules_1 = require("../data/appRules");
 const programCatalog_1 = require("../data/programCatalog");
+const VECTOR_DB_MODE = (process.env.VECTOR_DB_MODE || 'local').toLowerCase();
+const QDRANT_URL = process.env.QDRANT_URL?.replace(/\/+$/g, '') ?? '';
+const QDRANT_API_KEY = process.env.QDRANT_API_KEY ?? '';
+const QDRANT_COLLECTION_NAME = process.env.QDRANT_COLLECTION_NAME || 'aria_knowledge';
+const QDRANT_VECTOR_DIM = Number(process.env.QDRANT_VECTOR_DIM || '256');
+const QDRANT_DISTANCE = (process.env.QDRANT_DISTANCE || 'Cosine');
 const STOP_WORDS = new Set([
     'a',
     'an',
@@ -105,6 +111,26 @@ const cosineSimilarity = (a, b) => {
     }
     return dot / (Math.sqrt(normA) * Math.sqrt(normB));
 };
+const hashString = (value) => {
+    let hash = 2166136261;
+    for (let i = 0; i < value.length; i += 1) {
+        hash ^= value.charCodeAt(i);
+        hash += (hash << 1) + (hash << 4) + (hash << 7) + (hash << 8) + (hash << 24);
+    }
+    return hash >>> 0;
+};
+const toDenseVector = (text, dimension = QDRANT_VECTOR_DIM) => {
+    const vector = new Array(dimension).fill(0);
+    const tokens = tokenize(text);
+    tokens.forEach(token => {
+        const index = hashString(token) % dimension;
+        vector[index] += 1;
+    });
+    const norm = Math.sqrt(vector.reduce((sum, value) => sum + value * value, 0));
+    if (!norm)
+        return vector;
+    return vector.map(value => value / norm);
+};
 const buildDocuments = () => {
     const appDocs = [
         {
@@ -199,11 +225,121 @@ const buildDocuments = () => {
     return [...appDocs, ...ruleDocs, ...conversationalDocs, ...programDocs].map(document => ({
         ...document,
         vector: toVector(document.text),
+        denseVector: toDenseVector(document.text),
     }));
 };
-class VectorKnowledgeService {
-    constructor() {
-        this.documents = buildDocuments();
+const qdrantHeaders = () => {
+    const headers = {
+        'Content-Type': 'application/json',
+    };
+    if (QDRANT_API_KEY) {
+        headers['api-key'] = QDRANT_API_KEY;
+    }
+    return headers;
+};
+const qdrantRequest = async (path, method, body) => {
+    if (!QDRANT_URL) {
+        throw new Error('QDRANT_URL is not configured');
+    }
+    const response = await fetch(`${QDRANT_URL}${path}`, {
+        method,
+        headers: qdrantHeaders(),
+        body: body ? JSON.stringify(body) : undefined,
+    });
+    if (!response.ok) {
+        const responseBody = await response.text();
+        throw new Error(`Qdrant request failed ${response.status}: ${responseBody}`);
+    }
+    return response.json();
+};
+class QdrantVectorDatabase {
+    constructor(documents) {
+        this.initialized = false;
+        this.initPromise = null;
+        this.documents = documents;
+        if (QDRANT_URL) {
+            this.initPromise = this.initialize();
+        }
+    }
+    async ensureInitialized() {
+        if (this.initPromise) {
+            await this.initPromise;
+        }
+    }
+    async initialize() {
+        console.log('[VectorKnowledgeService] Initializing Qdrant vector database', {
+            collection: QDRANT_COLLECTION_NAME,
+            url: QDRANT_URL,
+            vectorDim: QDRANT_VECTOR_DIM,
+            distance: QDRANT_DISTANCE,
+        });
+        try {
+            await qdrantRequest(`/collections/${QDRANT_COLLECTION_NAME}`, 'GET');
+            console.log('[VectorKnowledgeService] Qdrant collection exists:', QDRANT_COLLECTION_NAME);
+        }
+        catch (err) {
+            console.log('[VectorKnowledgeService] Qdrant collection not found, creating:', QDRANT_COLLECTION_NAME);
+            await qdrantRequest(`/collections/${QDRANT_COLLECTION_NAME}`, 'PUT', {
+                vectors: {
+                    size: QDRANT_VECTOR_DIM,
+                    distance: QDRANT_DISTANCE,
+                },
+            });
+        }
+        const points = this.documents.map((document, index) => ({
+            id: index + 1,
+            vector: document.denseVector,
+            payload: {
+                docId: document.id,
+                type: document.type,
+                text: document.text,
+            },
+        }));
+        await qdrantRequest(`/collections/${QDRANT_COLLECTION_NAME}/points?wait=true`, 'PUT', {
+            points,
+        });
+        this.initialized = true;
+    }
+    async search(query, limit = 5) {
+        await this.ensureInitialized();
+        if (!QDRANT_URL) {
+            return [];
+        }
+        console.log('[VectorKnowledgeService] Running Qdrant search', {
+            collection: QDRANT_COLLECTION_NAME,
+            query: typeof query === 'string' ? query : JSON.stringify(query),
+            limit,
+        });
+        const queryVector = toDenseVector(query);
+        const body = {
+            vector: queryVector,
+            top: limit,
+            with_payload: true,
+            include_vectors: false,
+        };
+        const result = await qdrantRequest(`/collections/${QDRANT_COLLECTION_NAME}/points/search`, 'POST', body);
+        if (!Array.isArray(result.result)) {
+            return [];
+        }
+        return result.result
+            .map((item) => {
+            const docId = item.payload?.docId ?? item.id;
+            const document = this.documents.find(doc => String(doc.id) === String(docId));
+            return document
+                ? {
+                    id: document.id,
+                    type: document.type,
+                    text: document.text,
+                    score: item.score ?? 0,
+                }
+                : null;
+        })
+            .filter((hit) => hit !== null);
+    }
+}
+class LocalVectorDatabase {
+    constructor(documents) {
+        this.documents = documents;
     }
     search(query, limit = 5) {
         const queryVector = toVector(query);
@@ -217,6 +353,38 @@ class VectorKnowledgeService {
             .filter(hit => hit.score > 0)
             .sort((a, b) => b.score - a.score)
             .slice(0, limit);
+    }
+}
+const localVectorDatabase = new LocalVectorDatabase(buildDocuments());
+const qdrantVectorDatabase = new QdrantVectorDatabase(buildDocuments());
+class VectorKnowledgeService {
+    async search(query, limit = 5) {
+        console.log('[VectorKnowledgeService] search called', {
+            mode: VECTOR_DB_MODE,
+            hasQdrantUrl: Boolean(QDRANT_URL),
+            query: typeof query === 'string' ? query : JSON.stringify(query),
+            limit,
+        });
+        if (VECTOR_DB_MODE === 'qdrant') {
+            try {
+                const qdrantHits = await qdrantVectorDatabase.search(query, limit);
+                if (qdrantHits.length > 0) {
+                    console.log('[VectorKnowledgeService] Returning Qdrant search results', {
+                        count: qdrantHits.length,
+                    });
+                    return qdrantHits;
+                }
+                console.log('[VectorKnowledgeService] Qdrant search returned no results, falling back to local vector search');
+            }
+            catch (err) {
+                console.warn('[VectorKnowledgeService] Qdrant search failed, falling back to local vector search.', err);
+            }
+        }
+        else {
+            console.log('[VectorKnowledgeService] Qdrant mode disabled, using local vector search');
+        }
+        console.log('[VectorKnowledgeService] Using local vector search');
+        return localVectorDatabase.search(query, limit);
     }
 }
 exports.default = new VectorKnowledgeService();

@@ -122,6 +122,7 @@ const ProgramFinderScreen: React.FC<Props> = () => {
     );
     if (!validation.valid) {
       setFormErrors(validation.errors);
+      dispatch(clearResults());
       return;
     }
     setFormErrors({});

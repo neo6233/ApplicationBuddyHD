@@ -10,6 +10,7 @@ import {
   Platform,
   Alert,
   Image,
+  Animated,
 } from 'react-native';
 import {NativeStackNavigationProp} from '@react-navigation/native-stack';
 import {RootStackParamList} from '../navigation/AppNavigator';
@@ -31,9 +32,9 @@ import {
 import {saveProgram} from '../redux/slices/programSlice';
 import {Message} from '../models/ChatModel';
 import {Program} from '../models/ProgramModel';
-import {captureVoiceText, isVoiceSupported, resetVoicePromise} from '../services/voiceService';
+import {captureVoiceText, isVoiceSupported, resetVoicePromise, stopVoiceCapture} from '../services/voiceService';
 import {pickImageFromGallery} from '../services/imagePicker';
-import {speak, stopSpeaking} from '../services/ttsService';
+import {speak, stopSpeaking, subscribeToSpeechStatus} from '../services/ttsService';
 
 type Props = {
   navigation: NativeStackNavigationProp<RootStackParamList, 'Chat'>;
@@ -67,6 +68,61 @@ const WelcomeMessage: React.FC<{
   </View>
 );
 
+const ListeningWave: React.FC = () => {
+  const bars = useRef([
+    new Animated.Value(0.2),
+    new Animated.Value(0.8),
+    new Animated.Value(0.45),
+    new Animated.Value(0.65),
+  ]).current;
+
+  useEffect(() => {
+    const animations = bars.map((bar, index) =>
+      Animated.loop(
+        Animated.sequence([
+          Animated.delay(index * 90),
+          Animated.timing(bar, {
+            toValue: 1,
+            duration: 260,
+            useNativeDriver: false,
+          }),
+          Animated.timing(bar, {
+            toValue: 0.25,
+            duration: 260,
+            useNativeDriver: false,
+          }),
+        ]),
+      ),
+    );
+
+    animations.forEach(animation => animation.start());
+    return () => animations.forEach(animation => animation.stop());
+  }, [bars]);
+
+  return (
+    <View style={styles.listeningWave}>
+      {bars.map((bar, index) => (
+        <Animated.View
+          key={index}
+          style={[
+            styles.listeningWaveBar,
+            {
+              height: bar.interpolate({
+                inputRange: [0, 1],
+                outputRange: [7, 22],
+              }),
+              opacity: bar.interpolate({
+                inputRange: [0, 1],
+                outputRange: [0.65, 1],
+              }),
+            },
+          ]}
+        />
+      ))}
+    </View>
+  );
+};
+
 import {isSaveIntent, findProgramFromText} from '../services/ChatEngine';
 
 const ChatScreen: React.FC<Props> = () => {
@@ -76,6 +132,7 @@ const ChatScreen: React.FC<Props> = () => {
 
   const [inputText, setInputText] = useState('');
   const [isListening, setIsListening] = useState(false);
+  const [isSpeaking, setIsSpeaking] = useState(false);
   const [userImage, setUserImage] = useState<string | null>(null);
   const lastSpokenAssistantMessageId = useRef<string | null>(null);
   const shouldSpeakNextReplyRef = useRef(false);
@@ -155,12 +212,18 @@ useEffect(() => {
     void (async () => {
       try {
         await stopSpeaking();
+        setIsSpeaking(true);
         await speak(latestAssistantMessage.content, latestAssistantMessage.responseLanguage);
       } catch (error) {
+        setIsSpeaking(false);
         console.warn('[ChatScreen] TTS failed:', error);
       }
     })();
   }, [messages]);
+
+  useEffect(() => {
+    return subscribeToSpeechStatus(setIsSpeaking);
+  }, []);
 
   const clearPendingImage = useCallback(() => {
     setUserImage(null);
@@ -337,6 +400,20 @@ useEffect(() => {
     }
   }, [sendText, detectVoiceLocale]);
 
+  const handleStopVoiceInput = useCallback(async () => {
+    shouldSpeakNextReplyRef.current = false;
+    await stopVoiceCapture();
+    resetVoicePromise();
+    setIsListening(false);
+    setInputText('');
+  }, []);
+
+  const handleStopSpeaking = useCallback(async () => {
+    shouldSpeakNextReplyRef.current = false;
+    await stopSpeaking();
+    setIsSpeaking(false);
+  }, []);
+
   const handleClearChat = useCallback(() => {
     Alert.alert(Strings.CHAT_CLEAR, Strings.CHAT_CLEAR_CONFIRM, [
       {text: Strings.BTN_CANCEL, style: 'cancel'},
@@ -354,6 +431,7 @@ useEffect(() => {
 
   useEffect(() => {
     return () => {
+      stopVoiceCapture();
       stopSpeaking();
     };
   }, []);
@@ -461,17 +539,23 @@ useEffect(() => {
               styles.voiceButton,
               isListening && styles.voiceButtonActive,
             ]}
-            onPress={handleVoiceInput}
-            disabled={isListening || isTyping}
+            onPress={isListening ? handleStopVoiceInput : handleVoiceInput}
+            disabled={!isListening && isTyping}
             activeOpacity={0.8}>
-            <Text
-              style={[
-                styles.voiceIcon,
-                isListening && styles.voiceIconActive,
-              ]}>
-              {isListening ? '●' : '🎤'}
-            </Text>
+            {isListening ? (
+              <ListeningWave />
+            ) : (
+              <Text style={styles.voiceIcon}>🎤</Text>
+            )}
           </TouchableOpacity>
+          {isSpeaking ? (
+            <TouchableOpacity
+              style={styles.stopSpeechButton}
+              onPress={handleStopSpeaking}
+              activeOpacity={0.8}>
+              <Text style={styles.stopSpeechIcon}>■</Text>
+            </TouchableOpacity>
+          ) : null}
           {userImage ? (
             <TouchableOpacity
               style={styles.sendButton}
@@ -698,6 +782,40 @@ const styles = StyleSheet.create({
   },
   voiceIconActive: {
     color: Colors.white,
+  },
+  listeningWave: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexDirection: 'row',
+    gap: 3,
+    backgroundColor: 'rgba(255, 255, 255, 0.14)',
+  },
+  listeningWaveBar: {
+    width: 3,
+    borderRadius: 2,
+    backgroundColor: Colors.white,
+  },
+  stopSpeechButton: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: Colors.error,
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: Colors.error,
+    shadowOffset: {width: 0, height: 3},
+    shadowOpacity: 0.28,
+    shadowRadius: 8,
+    elevation: 5,
+  },
+  stopSpeechIcon: {
+    color: Colors.white,
+    fontSize: 18,
+    fontWeight: '900',
+    lineHeight: 20,
   },
 });
 

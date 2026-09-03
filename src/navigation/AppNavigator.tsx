@@ -6,6 +6,7 @@ import SplashScreen from '../screens/SplashScreen';
 import HomeScreen from '../screens/HomeScreen';
 import ChatScreen from '../screens/ChatScreen';
 import ProgramFinderScreen from '../screens/ProgramFinderScreen';
+import AllProgramsScreen from '../screens/AllProgramsScreen';
 import EligibilityScreen from '../screens/EligibilityScreen';
 import ProfileScreen from '../screens/ProfileScreen';
 import Colors from '../constants/Colors';
@@ -15,6 +16,7 @@ export type RootStackParamList = {
   Home: undefined;
   Chat: undefined;
   ProgramFinder: undefined;
+  AllPrograms: undefined;
   Eligibility: undefined;
   Profile: undefined;
 };
@@ -35,6 +37,7 @@ const AppNavigator: React.FC = () => {
         <Stack.Screen name="Home" component={HomeScreen} />
         <Stack.Screen name="Chat" component={ChatScreen} />
         <Stack.Screen name="ProgramFinder" component={ProgramFinderScreen} />
+        <Stack.Screen name="AllPrograms" component={AllProgramsScreen} />
         <Stack.Screen name="Eligibility" component={EligibilityScreen} />
         <Stack.Screen name="Profile" component={ProfileScreen} />
       </Stack.Navigator>

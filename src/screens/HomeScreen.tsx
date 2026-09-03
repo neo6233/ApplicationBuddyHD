@@ -51,6 +51,14 @@ const FEATURE_CARDS: FeatureCard[] = [
     glowColor: 'rgba(59, 130, 246, 0.15)',
   },
   {
+    emoji: '📚',
+    title: Strings.HOME_CARD_ALL_PROGRAMS,
+    description: Strings.HOME_CARD_ALL_PROGRAMS_DESC,
+    route: 'AllPrograms',
+    accentColor: Colors.info,
+    glowColor: 'rgba(37, 99, 235, 0.14)',
+  },
+  {
     emoji: '✅',
     title: Strings.HOME_CARD_ELIGIBILITY,
     description: Strings.HOME_CARD_ELIGIBILITY_DESC,
@@ -121,6 +129,7 @@ const HomeScreen: React.FC<Props> = ({navigation}) => {
     <GradientBackground style={styles.container}>
       <ScrollView
         showsVerticalScrollIndicator={false}
+        style={styles.scrollView}
         contentContainerStyle={styles.scrollContent}>
 
         {/* Header */}
@@ -144,6 +153,7 @@ const HomeScreen: React.FC<Props> = ({navigation}) => {
 
         {/* Stats Bar — Glass effect */}
         <View style={styles.statsBar}>
+          <View style={styles.statsGradient} />
           <View style={styles.statsGlassHighlight} />
           <View style={styles.statItem}>
             <Text style={styles.statValue}>{totalChats}</Text>
@@ -170,21 +180,35 @@ const HomeScreen: React.FC<Props> = ({navigation}) => {
               style={styles.card}
               onPress={() => navigation.navigate(card.route)}
               activeOpacity={0.8}>
-              {/* Accent glow — larger, more visible */}
+              <View style={styles.cardSurface} />
               <View
                 style={[
                   styles.cardAccentGlow,
                   {backgroundColor: card.glowColor},
                 ]}
               />
-              {/* Glass border top highlight */}
+              <View
+                style={[
+                  styles.cardAccentOrb,
+                  {backgroundColor: card.accentColor},
+                ]}
+              />
               <View
                 style={[
                   styles.cardTopBorder,
                   {backgroundColor: card.accentColor},
                 ]}
               />
-              <Text style={styles.cardEmoji}>{card.emoji}</Text>
+              <View style={styles.cardGradientTint} />
+              <View style={styles.cardIconWrap}>
+                <View
+                  style={[
+                    styles.cardIconGlow,
+                    {backgroundColor: card.accentColor},
+                  ]}
+                />
+                <Text style={styles.cardEmoji}>{card.emoji}</Text>
+              </View>
               <Text style={styles.cardTitle}>{card.title}</Text>
               <Text style={styles.cardDescription}>{card.description}</Text>
               <View style={[styles.cardChevron, {borderColor: card.accentColor}]}>
@@ -198,6 +222,8 @@ const HomeScreen: React.FC<Props> = ({navigation}) => {
 
         {recommendationGraph.length > 0 && (
           <View style={styles.graphCard}>
+            <View style={styles.graphSurface} />
+            <View style={styles.graphGlow} />
             <View style={styles.graphHeader}>
               <View>
                 <Text style={styles.graphTitle}>Course Suitability</Text>
@@ -252,8 +278,12 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
   },
+  scrollView: {
+    backgroundColor: 'transparent',
+  },
   scrollContent: {
     paddingBottom: 32,
+    backgroundColor: 'transparent',
   },
   header: {
     flexDirection: 'row',
@@ -286,7 +316,7 @@ const styles = StyleSheet.create({
     shadowOffset: {width: 0, height: 4},
     shadowOpacity: 0.5,
     shadowRadius: 12,
-    elevation: 8,
+    elevation: 30,
   },
   logoImage: {
     width: 50,
@@ -297,15 +327,28 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     marginHorizontal: 20,
-    backgroundColor: Colors.glass,
-    borderRadius: 16,
+    backgroundColor: 'rgba(247, 249, 255, 0.82)',
+    borderRadius: 18,
     paddingVertical: 18,
     paddingHorizontal: 20,
     borderWidth: 1,
-    borderColor: Colors.glassBorder,
+    borderColor: 'rgba(226, 232, 240, 0.95)',
     marginBottom: 28,
     overflow: 'hidden',
     position: 'relative',
+    shadowColor: '#8B5CF6',
+    shadowOffset: {width: 0, height: 12},
+    shadowOpacity: 0.08,
+    shadowRadius: 18,
+    elevation: 30,
+  },
+  statsGradient: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(139, 92, 246, 0.04)',
   },
   statsGlassHighlight: {
     position: 'absolute',
@@ -342,7 +385,7 @@ const styles = StyleSheet.create({
   sectionTitle: {
     fontSize: 13,
     fontWeight: '700',
-    color: Colors.white,
+    color: Colors.textPrimary,
     letterSpacing: 1.2,
     textTransform: 'uppercase',
     paddingHorizontal: 20,
@@ -357,35 +400,84 @@ const styles = StyleSheet.create({
   },
   card: {
     width: CARD_WIDTH,
-    backgroundColor: Colors.glass,
-    borderRadius: 20,
+    backgroundColor: 'rgba(255, 255, 255, 0.68)',
+    borderRadius: 22,
     padding: 18,
-    borderWidth: 1,
-    borderColor: Colors.glassBorder,
+    borderWidth: 0.8,
+    borderColor: 'rgba(226, 232, 240, 0.52)',
     overflow: 'hidden',
     position: 'relative',
+    shadowColor: '#0F172A',
+   shadowOffset: {width: 0, height: 6},
+    shadowOpacity: 0.04,
+    shadowRadius: 9,
+    elevation: 60,
+  },
+  cardSurface: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(255, 255, 255, 0.28)',
   },
   cardAccentGlow: {
     position: 'absolute',
-    top: -30,
-    right: -30,
-    width: 90,
-    height: 90,
-    borderRadius: 45,
+    top: -20,
+    right: -20,
+    width: 78,
+    height: 78,
+    borderRadius: 39,
+    opacity: 0.18,
+  },
+  cardAccentOrb: {
+    position: 'absolute',
+    top: 14,
+    right: 14,
+    width: 10,
+    height: 10,
+    borderRadius: 999,
+    opacity: 0.7,
+  },
+  cardGradientTint: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    height: 48,
+    backgroundColor: 'rgba(255, 255, 255, 0.08)',
   },
   cardTopBorder: {
     position: 'absolute',
     top: 0,
-    left: 20,
-    right: 20,
-    height: 2,
-    borderRadius: 1,
-    opacity: 0.5,
+    left: 18,
+    right: 18,
+    height: 3,
+    borderRadius: 999,
+    opacity: 0.7,
   },
-  cardEmoji: {
-    fontSize: 30,
+  cardIconWrap: {
+    width: 54,
+    height: 54,
+    borderRadius: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
     marginBottom: 14,
     marginTop: 4,
+    backgroundColor: 'rgba(255, 255, 255, 0.46)',
+    borderWidth: 0.7,
+    borderColor: 'rgba(255, 255, 255, 0.65)',
+    overflow: 'hidden',
+  },
+  cardIconGlow: {
+    position: 'absolute',
+    width: 54,
+    height: 54,
+    opacity: 0.1,
+  },
+  cardEmoji: {
+    fontSize: 26,
+    zIndex: 1,
   },
   cardTitle: {
     fontSize: 15,
@@ -413,13 +505,35 @@ const styles = StyleSheet.create({
   },
   graphCard: {
     marginHorizontal: 16,
-    backgroundColor: Colors.glass,
-    borderRadius: 18,
+    backgroundColor: 'rgba(248, 250, 255, 0.82)',
+    borderRadius: 20,
     padding: 18,
     borderWidth: 1,
-    borderColor: Colors.glassBorder,
+    borderColor: 'rgba(255, 255, 255, 0.88)',
     overflow: 'hidden',
     position: 'relative',
+    shadowColor: '#0F172A',
+    shadowOffset: {width: 0, height: 10},
+    shadowOpacity: 0.08,
+    shadowRadius: 16,
+    elevation: 40,
+  },
+  graphSurface: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(255, 255, 255, 0.18)',
+  },
+  graphGlow: {
+    position: 'absolute',
+    right: -18,
+    top: -18,
+    width: 96,
+    height: 96,
+    borderRadius: 48,
+    backgroundColor: 'rgba(139, 92, 246, 0.06)',
   },
   graphHeader: {
     flexDirection: 'row',
@@ -477,7 +591,7 @@ const styles = StyleSheet.create({
   graphTrack: {
     height: 9,
     borderRadius: 5,
-    backgroundColor: 'rgba(255,255,255,0.08)',
+    backgroundColor: 'rgba(148, 163, 184, 0.1)',
     overflow: 'hidden',
     marginRight: 46,
   },

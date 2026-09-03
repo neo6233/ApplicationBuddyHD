@@ -42,40 +42,56 @@ const ChatBubble: React.FC<ChatBubbleProps> = ({message, onSaveProgram, isProgra
 
     return lines.map((line, index) => {
       const trimmedLine = line.trim();
+      const listMatch = trimmedLine.match(/^(?:[\u2022*•\-]+\s*)+(.*)$/);
+      const contentLine = listMatch ? listMatch[1].trim() : trimmedLine;
+      const isListItem = Boolean(listMatch);
 
       const boldRegex = /\*\*(.*?)\*\*/g;
       const parts = [];
       let lastIndex = 0;
       let match;
 
-      while ((match = boldRegex.exec(trimmedLine)) !== null) {
+      while ((match = boldRegex.exec(contentLine)) !== null) {
         if (match.index > lastIndex) {
-          parts.push(trimmedLine.substring(lastIndex, match.index));
+          parts.push(contentLine.substring(lastIndex, match.index));
         }
         parts.push(
-          <Text key={match.index} style={[styles.boldText, isUser ? styles.userBoldText : styles.aiBoldText]}>
+          <Text key={`${index}-${match.index}`} style={[styles.boldText, isUser ? styles.userBoldText : styles.aiBoldText]}>
             {match[1]}
           </Text>,
         );
         lastIndex = boldRegex.lastIndex;
       }
 
-      if (lastIndex < trimmedLine.length) {
-        parts.push(trimmedLine.substring(lastIndex));
+      if (lastIndex < contentLine.length) {
+        parts.push(contentLine.substring(lastIndex));
       }
 
-      if (trimmedLine.startsWith('*')) {
+      const cleanedParts = parts.map(part =>
+        typeof part === 'string' ? part.replace(/\*\*/g, '') : part,
+      );
+
+      const isNumberedHeading = !isListItem && /^\d+\.\s/.test(contentLine);
+      if (isNumberedHeading && !isUser) {
+        return (
+          <View key={index} style={styles.headingContainer}>
+            <Text style={styles.headingText}>{cleanedParts}</Text>
+          </View>
+        );
+      }
+
+      if (isListItem) {
         return (
           <View key={index} style={styles.listItem}>
             <Text style={[styles.bullet, isUser ? styles.userBullet : styles.aiBulletText]}>•</Text>
-            <Text style={[styles.messageText, isUser ? styles.userText : styles.aiText]}>{parts}</Text>
+            <Text style={[styles.messageText, isUser ? styles.userText : styles.aiText, styles.listText]}>{cleanedParts}</Text>
           </View>
         );
       }
 
       return (
         <Text key={index} style={[styles.messageText, isUser ? styles.userText : styles.aiText]}>
-          {parts}
+          {cleanedParts}
         </Text>
       );
     });
@@ -234,11 +250,11 @@ const styles = StyleSheet.create({
     color: Colors.secondary,
   },
   bubbleColumn: {
-    maxWidth: '75%',
+    maxWidth: '82%',
   },
   bubble: {
-    paddingHorizontal: 16,
-    paddingVertical: 12,
+    paddingHorizontal: 20,
+    paddingVertical: 16,
     borderRadius: 18,
   },
   userBubble: {
@@ -266,12 +282,17 @@ const styles = StyleSheet.create({
     fontSize: 15,
     lineHeight: 22,
     fontWeight: '400',
+    textAlign: 'left',
+    marginBottom: 6,
+  },
+  listText: {
+    flex: 1,
   },
   userText: {
     color: '#FFFFFF',
   },
   aiText: {
-    color: '#E2E8F0',
+    color: Colors.bubbleAIText,
   },
   saveProgramButton: {
     alignSelf: 'flex-start',
@@ -308,12 +329,13 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
   },
   aiBoldText: {
-    color: '#F8FAFC',
+    color: Colors.bubbleAIText,
   },
   listItem: {
     flexDirection: 'row',
     alignItems: 'flex-start',
-    marginBottom: 4,
+    marginBottom: 8,
+    marginTop: 4,
   },
   bullet: {
     width: 16,
@@ -324,7 +346,23 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
   },
   aiBulletText: {
-    color: '#CBD5E1',
+    color: Colors.bubbleAIText,
+  },
+  headingContainer: {
+    marginVertical: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderLeftWidth: 4,
+    borderLeftColor: Colors.primaryLight,
+    backgroundColor: 'rgba(139, 92, 246, 0.08)',
+    borderRadius: 6,
+  },
+  headingText: {
+    fontSize: 15,
+    lineHeight: 22,
+    fontWeight: '700',
+    color: Colors.bubbleAIText,
+    textAlign: 'left',
   },
   programList: {
     marginTop: 10,
@@ -377,13 +415,13 @@ const styles = StyleSheet.create({
   programMeta: {
     fontSize: 12,
     lineHeight: 17,
-    color: '#CBD5E1',
+    color: Colors.textSecondary,
   },
   programEligibility: {
     marginTop: 7,
     fontSize: 12,
     lineHeight: 17,
-    color: '#E2E8F0',
+    color: Colors.bubbleAIText,
   },
   timestamp: {
     fontSize: 11,

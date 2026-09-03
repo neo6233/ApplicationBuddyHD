@@ -18,7 +18,7 @@ exports.APP_RULES = [
         id: 'after_12th_options',
         priority: 90,
         keywords: ['12th', '12 pass', 'class 12', 'secondary', 'intermediate', 'after 12th'],
-        text: 'After 12th, show only undergraduate bachelor programs and diploma programs from the catalog.',
+        text: 'When a student only says they want course suggestions after 12th, ask their subject or career interest first. If they explicitly ask for available/list/eligible courses, show only undergraduate bachelor programs and diploma programs from the catalog.',
     },
     {
         id: 'diploma_request',

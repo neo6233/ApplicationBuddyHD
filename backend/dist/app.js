@@ -36,9 +36,9 @@ app.use((0, cors_1.default)({
     allowedHeaders: ['Content-Type', 'Authorization'],
     credentials: true,
 }));
-// Body parsing — allow up to 6 MB for base64 image payloads
-app.use(express_1.default.json({ limit: '6mb' }));
-app.use(express_1.default.urlencoded({ extended: true, limit: '6mb' }));
+// Body parsing — allow base64 document payloads for eligibility checks.
+app.use(express_1.default.json({ limit: '15mb' }));
+app.use(express_1.default.urlencoded({ extended: true, limit: '15mb' }));
 // Logging
 if (process.env.NODE_ENV !== 'test') {
     app.use((0, morgan_1.default)('dev'));

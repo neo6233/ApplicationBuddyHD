@@ -1,8 +1,13 @@
 export interface EligibilityRequest {
-  qualification: string;
-  percentage: string;
-  englishScore: string;
-  workExperience: string;
+  qualification?: string;
+  percentage?: string;
+  englishScore?: string;
+  workExperience?: string;
+  document?: {
+    base64: string;
+    mimeType?: string;
+    fileName?: string;
+  };
 }
 
 export interface EligibleCourse {
@@ -19,4 +24,15 @@ export interface EligibilityResponse {
   notEligibleCourses: EligibleCourse[];
   summary: string;
   recommendations: string[];
+  extractedProfile?: {
+    qualification?: string;
+    percentage?: string;
+    englishScore?: string;
+    workExperience?: string;
+    documentSummary?: string;
+    nextStep?: string;
+    sourceType?: string;
+    extractionStatus?: 'read' | 'failed';
+    extractionMessage?: string;
+  };
 }

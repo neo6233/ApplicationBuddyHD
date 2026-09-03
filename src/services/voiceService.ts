@@ -12,6 +12,14 @@ export function resetVoicePromise() {
   voicePromise = null;
 }
 
+export async function stopVoiceCapture() {
+  try {
+    await SpeechToText.stop();
+  } catch {}
+
+  voicePromise = null;
+}
+
 export function isVoiceSupported() {
   return true;
 }

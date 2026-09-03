@@ -302,18 +302,55 @@ const parseNumericScore = (input: string): number | undefined => {
   return undefined;
 };
 
+const hasSchoolQualification = (text: string) =>
+  includesAny(text, ['high school', 'secondary', '12th', '12 pass', 'class 12', '10th', '10 pass', 'intermediate']) ||
+  /\b(?:after\s+(?:my\s+)?|class\s*)12\b|\b12\s*(?:pass|standard|std|grade)\b/i.test(text);
+
+const hasBachelorQualification = (text: string) =>
+  includesAny(text, ['bachelor', "bachelor's", 'bachelors', 'btech', 'b.tech', 'b.sc', 'bsc', 'bba', 'b.e', 'graduation', 'graduate', 'b.a', 'b.com']);
+
+const COUNTRY_ALIASES: Record<string, string[]> = {
+  uk: ['uk', 'united kingdom', 'england', 'britain', 'great britain'],
+  usa: ['usa', 'us', 'united states', 'america'],
+  canada: ['canada'],
+  australia: ['australia'],
+  'new zealand': ['new zealand', 'nz'],
+  germany: ['germany'],
+};
+
 const inferLevel = (q: string): 'UG' | 'PG' | 'Diploma' | 'Any' => {
   const t = normalize(q);
   if (includesAny(t, ['phd', 'doctorate', 'dr.'])) return 'PG';
-  if (includesAny(t, ['master', 'msc', 'ma', 'mtech', 'mba', 'pg', 'post graduate', 'postgraduate'])) return 'PG';
+  if (includesAny(t, ['master', 'msc', 'mtech', 'mba', 'post graduate', 'postgraduate']) || /\b(?:ma|pg)\b/i.test(t)) return 'PG';
   if (includesAny(t, ['diploma', 'certificate', 'polytechnic'])) return 'Diploma';
-  if (includesAny(t, ['bachelor', 'be', 'btech', 'b.sc', 'bba', 'undergraduate', 'ug', 'b.a', 'b.com'])) return 'UG';
-  if (includesAny(t, ['12th', '12 pass', 'class 12', 'high school', 'secondary', '10th', '10 pass'])) return 'UG';
+  if (hasBachelorQualification(t) || includesAny(t, ['undergraduate', 'ug'])) return 'UG';
+  if (hasSchoolQualification(t)) return 'UG';
   // Hindi education levels
   if (includesAny(t, ['12वीं', '12वीं पास', 'बारहवीं', 'दसवीं', '10वीं'])) return 'UG';
   if (includesAny(t, ['स्नातक', 'स्नातकोत्तर', 'मास्टर्स', 'पीजी'])) return 'PG';
   if (includesAny(t, ['डिप्लोमा'])) return 'Diploma';
   return 'Any';
+};
+
+const inferNextLevel = (qualification: string): 'UG' | 'PG' | 'Diploma' | 'Any' => {
+  const t = normalize(qualification);
+  if (hasBachelorQualification(t) || includesAny(t, ['undergraduate'])) return 'PG';
+  if (includesAny(t, ['master', 'msc', 'mtech', 'mba', 'post graduate', 'postgraduate']) || /\b(?:ma|pg)\b/i.test(t)) return 'PG';
+  if (includesAny(t, ['diploma', 'certificate', 'polytechnic'])) return 'UG';
+  if (hasSchoolQualification(t)) return 'UG';
+  return 'Any';
+};
+
+const countryMatches = (programCountry: string, preferredCountry: string): boolean => {
+  const preferred = normalize(preferredCountry);
+  const catalogCountry = normalize(programCountry);
+  if (!preferred) return false;
+  if (catalogCountry.includes(preferred) || preferred.includes(catalogCountry)) return true;
+  return Object.values(COUNTRY_ALIASES).some(
+    aliases =>
+      aliases.includes(catalogCountry) &&
+      aliases.some(alias => preferred.includes(alias)),
+  );
 };
 
 const hasMinimalProfileInfo = (profile: any): boolean => {
@@ -344,22 +381,35 @@ const scoreCatalogItem = (item: ProgramCatalogItem, data: ProgramFinderInput): n
   const it = normalize(data.interests);
   const ct = normalize(data.preferredCountry);
   const level = inferLevel(data.qualification);
+  const nextLevel = inferNextLevel(data.qualification);
   const score = parseNumericScore(data.gpa);
-  let total = 45;
+  const schoolLevelOnly = hasSchoolQualification(qt) && !hasBachelorQualification(qt);
 
-  if (item.countries.some(c => normalize(c).includes(ct) || ct.includes(normalize(c)))) total += 20;
-  if (level === item.level || level === 'Any') total += 20;
-  else if (level === 'UG' && item.level === 'Diploma') total += 10;
-  else if (level === 'PG' && item.level !== 'UG') total += 10;
-  if (item.fields.some(f => includesAny(it, [f]))) total += 20;
+  if (schoolLevelOnly && item.level === 'PG') return -999;
+  if (hasBachelorQualification(qt) && item.level !== 'PG') return -999;
+  if (level === 'PG' && (item.level === 'UG' || item.level === 'Diploma')) return -999;
+
+  let total = 15;
+
+  if (ct) {
+    if (countryMatches(item.country, ct)) total += 20;
+    else if (item.countries.some(c => countryMatches(c, ct))) total += 5;
+    else total -= 8;
+  }
+  if (nextLevel === item.level) total += 20;
+  else if (level === item.level || level === 'Any') total += 10;
+  else if (level === 'UG' && item.level === 'Diploma') total -= 15;
+  else if (level === 'PG' && item.level !== 'UG') total += 5;
+  if (item.fields.some(f => includesAny(it, [f]))) total += 30;
   else {
     const inf = inferField(it);
-    if (inf && item.fields.some(f => includesAny(normalize(f), [inf]))) total += 15;
+    if (inf && item.fields.some(f => includesAny(normalize(f), [inf]))) total += 18;
+    else if (it) total -= 20;
   }
   if (score !== undefined && item.minGpa !== undefined) {
-    total += score >= item.minGpa * 10 ? 10 : -10;
+    total += score >= item.minGpa * 10 ? 15 : -15;
   }
-  if (qt && item.minQualificationKeywords.some(k => qt.includes(k))) total += 10;
+  if (qt && item.minQualificationKeywords.some(k => qt.includes(k))) total += 5;
   return Math.max(35, Math.min(98, total));
 };
 
@@ -408,8 +458,11 @@ const buildLanguageInstruction = (language: 'hi' | 'en'): string =>
     : 'The latest user message is English. Answer ONLY in English. NO Hindi words. Do not continue Hindi from older chat history.';
 
 export const buildLocalProgramResponse = (data: ProgramFinderInput): ProgramFinderResponse => {
+  const nextLevel = inferNextLevel(data.qualification);
   const selected = [...PROGRAM_CATALOG]
+    .filter(item => nextLevel === 'Any' || item.level === nextLevel)
     .map(item => ({item, matchScore: scoreCatalogItem(item, data)}))
+    .filter(item => item.matchScore === 35 || item.matchScore >= 60)
     .sort((a, b) => b.matchScore - a.matchScore)
     .slice(0, 5);
 
@@ -575,6 +628,7 @@ USER: ${userMessage}`;
       temperature?: number;
       userImage?: string | null;
       language?: 'hi' | 'en';
+      extraSystemPrompt?: string;
     },
   ): Promise<string> {
     const normalizedUserImage = normalizeImageData(options?.userImage);
@@ -618,11 +672,14 @@ USER: ${userMessage}`;
       }
 
       const languageInstruction = buildLanguageInstruction(replyLanguage);
+      const knowledgePrompt = options?.extraSystemPrompt
+        ? `${options.extraSystemPrompt}\n\n`
+        : '';
 
       return await this.callOllama({
         systemPrompt: promptPrefix
-          ? `${promptPrefix}\n\n${selectedSystemPrompt}\n\n${languageInstruction}`
-          : `${selectedSystemPrompt}\n\n${languageInstruction}`,
+          ? `${promptPrefix}\n\n${knowledgePrompt}${selectedSystemPrompt}\n\n${languageInstruction}`
+          : `${knowledgePrompt}${selectedSystemPrompt}\n\n${languageInstruction}`,
         messages,
         temperature: options?.temperature ?? 0.2,
         maxOutputTokens: options?.maxOutputTokens ?? 256,
@@ -659,6 +716,98 @@ Rules:
       temperature: 0.1,
       jsonMode: true,
       maxOutputTokens: 1024,
+    });
+  }
+
+  async extractEligibilityProfileFromDocument(data: {
+    imageBase64: string;
+    mimeType?: string;
+    fileName?: string;
+    typedQualification?: string;
+    typedPercentage?: string;
+    typedEnglishScore?: string;
+    typedWorkExperience?: string;
+  }): Promise<string> {
+    const prompt = `Read the uploaded student document carefully. It may be a 12th marksheet, bachelor marksheet/transcript, degree certificate, or resume.
+
+Return JSON ONLY, no markdown.
+Schema:
+{"qualification":"","percentage":"","englishScore":"","workExperience":"","documentSummary":"","nextStep":"","confidence":0.0}
+
+Extraction rules:
+1. Use only details visible in the document plus the typed corrections below.
+2. Prefer typed corrections if they conflict with the document.
+3. qualification should be the highest completed or clearly current qualification, e.g. "12th Science", "Bachelor of Engineering", "B.Tech Computer Science".
+4. percentage should be an overall percentage/GPA/CGPA if visible. If only CGPA is visible, keep it as written, e.g. "8.1 CGPA".
+5. englishScore should include IELTS/PTE/TOEFL only if visible or typed.
+6. workExperience should summarize resume experience only if visible or typed.
+7. documentSummary should briefly say what document was read and the key academic facts.
+8. nextStep should say what the student can do next: UG/Diploma after 12th, PG/Master after bachelor, or improve marks/clear qualification if not eligible.
+9. If a value is not visible, return an empty string for that field.
+
+Typed corrections:
+qualification=${data.typedQualification || ''}
+percentage=${data.typedPercentage || ''}
+englishScore=${data.typedEnglishScore || ''}
+workExperience=${data.typedWorkExperience || ''}
+fileName=${data.fileName || ''}`;
+
+    return this.callOllama({
+      systemPrompt: 'You are ARIA document reader. Extract student academic profile accurately from uploaded education documents. Return JSON only.',
+      messages: [
+        {
+          role: 'user',
+          content: prompt,
+          images: [normalizeImageData(data.imageBase64) || data.imageBase64],
+        },
+      ],
+      temperature: 0.05,
+      jsonMode: true,
+      maxOutputTokens: 360,
+    });
+  }
+
+  async extractEligibilityProfileFromTextDocument(data: {
+    documentText: string;
+    fileName?: string;
+    typedQualification?: string;
+    typedPercentage?: string;
+    typedEnglishScore?: string;
+    typedWorkExperience?: string;
+  }): Promise<string> {
+    const prompt = `Read the extracted text from the uploaded student document carefully. It may be a 12th marksheet, bachelor marksheet/transcript, degree certificate, or resume.
+
+Return JSON ONLY, no markdown.
+Schema:
+{"qualification":"","percentage":"","englishScore":"","workExperience":"","documentSummary":"","nextStep":"","confidence":0.0}
+
+Extraction rules:
+1. Use only details visible in the document text plus the typed corrections below.
+2. Prefer typed corrections if they conflict with the document text.
+3. qualification should be the highest completed or clearly current qualification, e.g. "12th Science", "Bachelor of Engineering", "B.Tech Computer Science".
+4. percentage should be an overall percentage/GPA/CGPA if visible. If only CGPA is visible, keep it as written, e.g. "8.1 CGPA".
+5. englishScore should include IELTS/PTE/TOEFL only if visible or typed.
+6. workExperience should summarize resume experience only if visible or typed.
+7. documentSummary should briefly say what document was read and the key academic facts.
+8. nextStep should say what the student can do next: UG/Diploma after 12th, PG/Master after bachelor, or improve marks/clear qualification if not eligible.
+9. If a value is not visible, return an empty string for that field.
+
+Typed corrections:
+qualification=${data.typedQualification || ''}
+percentage=${data.typedPercentage || ''}
+englishScore=${data.typedEnglishScore || ''}
+workExperience=${data.typedWorkExperience || ''}
+fileName=${data.fileName || ''}
+
+Document text:
+${data.documentText.slice(0, 12000)}`;
+
+    return this.callOllama({
+      systemPrompt: 'You are ARIA document reader. Extract student academic profile accurately from uploaded education documents. Return JSON only.',
+      messages: [{role: 'user', content: prompt}],
+      temperature: 0.05,
+      jsonMode: true,
+      maxOutputTokens: 360,
     });
   }
 }

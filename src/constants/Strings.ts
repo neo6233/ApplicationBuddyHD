@@ -18,6 +18,8 @@ const Strings = {
   HOME_CARD_AI_DESC: 'Chat with ARIA for personalised guidance',
   HOME_CARD_PROGRAMS: 'Program Finder',
   HOME_CARD_PROGRAMS_DESC: 'Discover courses that match your profile',
+  HOME_CARD_ALL_PROGRAMS: 'All Programs',
+  HOME_CARD_ALL_PROGRAMS_DESC: 'View your full program catalog',
   HOME_CARD_ELIGIBILITY: 'Eligibility Checker',
   HOME_CARD_ELIGIBILITY_DESC: 'Check your qualification requirements',
   HOME_CARD_PROFILE: 'My Profile',
@@ -45,6 +47,7 @@ const Strings = {
   PROGRAM_COUNTRY_PLACEHOLDER: 'e.g. Australia, UK, Canada, USA',
   PROGRAM_SUBMIT: 'Find Programs',
   PROGRAM_NO_RESULTS: 'No programs found. Try adjusting your inputs.',
+  ALL_PROGRAMS_TITLE: 'All Programs',
 
   // Eligibility Checker
   ELIGIBILITY_TITLE: 'Eligibility Checker',

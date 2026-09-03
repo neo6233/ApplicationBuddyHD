@@ -40,9 +40,9 @@ app.use(
   }),
 );
 
-// Body parsing — allow up to 6 MB for base64 image payloads
-app.use(express.json({limit: '6mb'}));
-app.use(express.urlencoded({extended: true, limit: '6mb'}));
+// Body parsing — allow base64 document payloads for eligibility checks.
+app.use(express.json({limit: '15mb'}));
+app.use(express.urlencoded({extended: true, limit: '15mb'}));
 
 // Logging
 if (process.env.NODE_ENV !== 'test') {
